@@ -517,7 +517,7 @@ namespace ACE.Server.WorldObjects
                 return (float)MaxAttackSpeed;
 
             var animSpeed = (float)Math.Clamp((1.0 / divisor), MinAttackSpeed, MaxAttackSpeed);
-            animSpeed *= 4;
+
             return animSpeed;
         }
 
