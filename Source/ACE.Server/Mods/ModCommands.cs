@@ -15,32 +15,39 @@ namespace ACE.Server.Command.Handlers
     {
         private static readonly ILog log = LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
 
-        [CommandHandler("listmods", AccessLevel.Developer, CommandHandlerFlag.ConsoleInvoke, 0,
+        [CommandHandler("listmods", AccessLevel.Developer, CommandHandlerFlag.None, 0,
             "Lists available mods and their status.")]
         public static void HandleListMods(Session session, params string[] parameters)
         {
             ModManager.ListMods();
         }
 
-        [CommandHandler("loadmods", AccessLevel.Developer, CommandHandlerFlag.ConsoleInvoke, 0,
-            "Loads mods from the mod folder and enables active ones.")]
-        public static void HandleLoadMods(Session session, params string[] parameters)
+        [CommandHandler("findmods", AccessLevel.Developer, CommandHandlerFlag.None, 0,
+            "Finds mods with valid metadata in the mod folder.")]
+        public static void HandleFindMods(Session session, params string[] parameters)
         {
-            ModManager.LoadMods();
+            ModManager.FindMods();
         }
 
-        [CommandHandler("enablemod", AccessLevel.Developer, CommandHandlerFlag.ConsoleInvoke, 1,
+        [CommandHandler("enablemod", AccessLevel.Developer, CommandHandlerFlag.None, 1,
             "Loads mods from the mod folder and enables active ones.")]
         public static void HandleEnableMod(Session session, params string[] parameters)
         {
             ModManager.EnableModByName(parameters[0]);
         }
 
-        [CommandHandler("disablemod", AccessLevel.Developer, CommandHandlerFlag.ConsoleInvoke, 1,
+        [CommandHandler("disablemod", AccessLevel.Developer, CommandHandlerFlag.None, 1,
             "Loads mods from the mod folder and enables active ones.")]
         public static void HandleDisableMod(Session session, params string[] parameters)
         {
             ModManager.UnpatchModByName(parameters[0]);
+        }
+
+        [CommandHandler("test", AccessLevel.Developer, CommandHandlerFlag.None, 0,
+            "Loads mods from the mod folder and enables active ones.")]
+        public static void HandleTest(Session session, params string[] parameters)
+        {
+            ModManager.Test();
         }
     }
 }
