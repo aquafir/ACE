@@ -1,5 +1,8 @@
+using ACE.Mod;
+using ACE.Server.Command;
 using HarmonyLib;
 using log4net;
+using McMaster.NETCore.Plugins;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Mono.Cecil.Cil;
 using Newtonsoft.Json;
@@ -8,6 +11,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 
 namespace ACE.Server.Mod
 {
@@ -20,16 +24,25 @@ namespace ACE.Server.Mod
         /// <summary>
         /// Mods with at least metadata loaded
         /// </summary>
-        private static List<ModEntry> _mods = new();
+        private static List<ModContainer> _mods = new();
 
-        public static void Initialize() { }
+        public static void Initialize() {
+            FindMods();
+            EnableAllMods(_mods);
+        }
+        internal static bool Test(int i = 1)
+        {
+            log.Info($"Test {i}");
+            return true;
+        }
+        
 
         public static void ListMods()
         {
             foreach (var mod in _mods)
             {
                 var meta = mod.ModMetadata;
-                Console.WriteLine($"{meta.Name} is {(meta.Enabled ? "Enabled" : "Disabled")}\r\n\tSource: {mod.Source}\r\n\tStatus: {mod.Status}");
+                Console.WriteLine($"{meta.Name} is {(meta.Enabled ? "Enabled" : "Disabled")}\r\n\tSource: {mod.FolderPath}\r\n\tStatus: {mod.Status}");
             }
         }
 
@@ -42,7 +55,8 @@ namespace ACE.Server.Mod
             _mods = LoadModEntries(ModDirectory);
             _mods = _mods.OrderByDescending(x => x.ModMetadata.Priority).ToList();
 
-            CheckDuplicateNames(_mods);
+            //Todo: Filter out bad mods here or when loading entries?
+            //CheckDuplicateNames(_mods);
 
             ListMods();
             //EnableAllMods(ModManager._mods);
@@ -53,7 +67,7 @@ namespace ACE.Server.Mod
         /// </summary>
         /// <param name="directory"></param>
         /// <returns></returns>
-        private static List<ModEntry> LoadModEntries(string directory, bool unpatch = true)
+        private static List<ModContainer> LoadModEntries(string directory, bool unpatch = true)
         {
             //Todo: decide if this should always be done?
             if (unpatch)
@@ -67,127 +81,80 @@ namespace ACE.Server.Mod
                 LoadMod(entry);
             }
             return entries;
-
-            //var loadedMods = new List<ModEntry>();
-
-            ////Structure is /modDir/<AssemblyName>/<AssemblyName.dll> and Meta.json
-            //foreach (var modDir in Directory.GetDirectories(directory))
-            //{
-            //    //var metadataPath = Path.Combine(modDir, ModMetadata.FILENAME);
-            //    var modName = new DirectoryInfo(modDir).Name;
-            //    var dllPath = Path.Combine(modDir, modName + ".dll");
-
-            //    if (!File.Exists(dllPath))
-            //    {
-            //        //Log missing mod
-            //        continue;
-            //    }
-
-            //    //Todo: decide if assemblies should be loaded if mods are inactive.  Currently using Unloaded
-            //    if (!metadata.Enabled)
-            //    {
-            //        loadedMods.Add(entry);
-            //        continue;
-            //    }
-
-            //    //Load mod and get the type
-            //    try
-            //    {
-            //        var modDll = Assembly.UnsafeLoadFrom(dllPath);
-
-            //        //var types = modDll.GetTypes();
-            //        //modTypes = modDll.GetTypes().Where(t => typeof(IHarmonyMod).IsAssignableFrom(t)).ToList();    //Non-explicit version with possibility of multiple types
-            //        entry.ModType = modDll.GetType($"{modName}.{ModMetadata.TYPENAME}");
-
-            //        if (entry.ModType is null)
-            //        {
-            //            entry.Status = ModStatus.LoadFailure;
-            //            log.Warn($"Failed to load Type {modName}.{ModMetadata.TYPENAME} from {modDll}");
-            //        }
-            //        else
-            //        {
-            //            entry.Status = ModStatus.Inactive;
-            //        }
-            //    }
-            //    catch (Exception e)
-            //    {
-            //        //Logger.Log($"Failed to load mod file `{dllPath}`: {e}");
-            //        entry.Status = ModStatus.LoadFailure;
-            //    }
-
-            //    loadedMods.Add(entry);
-            //}
-
-            //return loadedMods;
         }
 
         /// <summary>
-        /// Loads IHarmonyMod type for mod entry if available
+        /// Sets up PluginLoader and IHarmonyMod type for mod entry if possible
         /// </summary>
         /// <param name="entry"></param>
-        private static void LoadMod(ModEntry entry)
+        private static void LoadMod(ModContainer entry)
         {
-            var folderName = new DirectoryInfo(entry.Source).Name;
-            var dllPath = Path.Combine(entry.Source, folderName + ".dll");
+            var folderName = new DirectoryInfo(entry.FolderPath).Name;
+            var dllPath = Path.Combine(entry.FolderPath, folderName + ".dll");
 
-            if (!File.Exists(dllPath))
-            {
-                log.Warn($"Nothing loaded for missing mod: {dllPath}");
-                return;
-            }
 
-            //Todo: decide if assemblies should be loaded if mods are inactive.  Currently using Unloaded
-            if (!entry.ModMetadata.Enabled)
-            {
-                log.Info($"Nothing loaded for disabled mod: {dllPath}");
-                return;
-            }
+            //entry.
+            entry.Initialize();
+            return;
 
-            try
-            {
-                //Todo: do this without locking dll for hot reload
-                var modDll = Assembly.UnsafeLoadFrom(dllPath);
+            //if (!File.Exists(dllPath))
+            //{
+            //    log.Warn($"Nothing loaded for missing mod: {dllPath}");
+            //    return;
+            //}
 
-                //Non-explicit version with possibility of IHarmonyMod types
-                //var types = modDll.GetTypes();
-                //modTypes = modDll.GetTypes().Where(t => typeof(IHarmonyMod).IsAssignableFrom(t)).ToList();
+            ////Todo: decide if assemblies should be loaded if mods are inactive.  Currently using Unloaded
+            //if (!entry.ModMetadata.Enabled)
+            //{
+            //    log.Info($"Nothing loaded for disabled mod: {dllPath}");
+            //    return;
+            //}
 
-                //Safer to use the dll to get the type than using convention
-                var typeName = modDll.ManifestModule.ScopeName.Replace(".dll", "." + ModMetadata.TYPENAME);
-                entry.ModType = modDll.GetType(typeName);
+            //try
+            //{
+            //    //Todo: do this without locking dll for hot reload
+            //    var modDll = Assembly.UnsafeLoadFrom(dllPath);
 
-                if (entry.ModType is null)
-                {
-                    entry.Status = ModStatus.LoadFailure;
-                    log.Warn($"Missing IHarmonyMod Type {typeName} from {modDll}");
-                }
-                else
-                {
-                    entry.Status = ModStatus.Inactive;
-                }
-            }
-            catch (Exception e)
-            {
-                entry.Status = ModStatus.LoadFailure;
-                log.Error($"Failed to load mod file `{dllPath}`: {e}");
-            }
+            //    //Non-explicit version with possibility of IHarmonyMod types
+            //    //var types = modDll.GetTypes();
+            //    //modTypes = modDll.GetTypes().Where(t => typeof(IHarmonyMod).IsAssignableFrom(t)).ToList();
+
+            //    //Safer to use the dll to get the type than using convention
+            //    var typeName = modDll.ManifestModule.ScopeName.Replace(".dll", "." + ModMetadata.TYPENAME);
+            //    entry.ModType = modDll.GetType(typeName);
+
+            //    if (entry.ModType is null)
+            //    {
+            //        entry.Status = ModStatus.LoadFailure;
+            //        log.Warn($"Missing IHarmonyMod Type {typeName} from {modDll}");
+            //    }
+            //    else
+            //    {
+            //        entry.Status = ModStatus.Inactive;
+            //    }
+            //}
+            //catch (Exception e)
+            //{
+            //    entry.Status = ModStatus.LoadFailure;
+            //    log.Error($"Failed to load mod file `{dllPath}`: {e}");
+            //}
         }
 
         /// <summary>
-        /// Loads all valid metadata from folders in a given directory as ModEntry
+        /// Loads all valid metadata from folders in a given directory as ModContainer
         /// </summary>
         /// <param name="directory"></param>
         /// <returns></returns>
-        private static List<ModEntry> LoadAllMetadata(string directory)
+        private static List<ModContainer> LoadAllMetadata(string directory)
         {
-            var loadedMods = new List<ModEntry>();
+            var loadedMods = new List<ModContainer>();
 
             //Structure is /modDir/<AssemblyName>/<AssemblyName.dll> and Meta.json
             foreach (var modDir in Directory.GetDirectories(directory))
             {
                 var metadataPath = Path.Combine(modDir, ModMetadata.FILENAME);
 
-                if (!TryLoadModEntry(metadataPath, out var entry))
+                if (!TryLoadModContainer(metadataPath, out var entry))
                 {
                     continue;
                 }
@@ -204,7 +171,7 @@ namespace ACE.Server.Mod
         /// <param name="metadataPath"></param>
         /// <param name="entry"></param>
         /// <returns></returns>
-        private static bool TryLoadModEntry(string metadataPath, out ModEntry entry)
+        private static bool TryLoadModContainer(string metadataPath, out ModContainer entry)
         {
             entry = null;
 
@@ -219,10 +186,10 @@ namespace ACE.Server.Mod
             {
                 var metadata = JsonConvert.DeserializeObject<ModMetadata>(File.ReadAllText(metadataPath));
 
-                entry = new ModEntry()
+                entry = new ModContainer()
                 {
                     ModMetadata = metadata,
-                    Source = Path.GetDirectoryName(metadataPath),    //Todo: would dll/metadata path make more sense?
+                    FolderPath = Path.GetDirectoryName(metadataPath),    //Todo: would dll/metadata path make more sense?
                 };
 
                 return true;
@@ -234,22 +201,22 @@ namespace ACE.Server.Mod
             }
         }
 
-        private static void CheckDuplicateNames(List<ModEntry> mods)
-        {
-            foreach (var group in mods.OrderByDescending(x => x.ModMetadata.Priority).GroupBy(m => m.ModMetadata.Name))
-            {
-                //First is highest priority mod with a name, flag any others
-                foreach (var mod in group.Skip(1))
-                {
-                    log.Error($"Duplicate mod found: {mod.ModMetadata.Name}");
-                    mod.Status = ModStatus.NameConflict;
-                }
-            }
-        }
+        //private static void CheckDuplicateNames(List<ModContainer> mods)
+        //{
+        //    foreach (var group in mods.OrderByDescending(x => x.ModMetadata.Priority).GroupBy(m => m.ModMetadata.Name))
+        //    {
+        //        //First is highest priority mod with a name, flag any others
+        //        foreach (var mod in group.Skip(1))
+        //        {
+        //            log.Error($"Duplicate mod found: {mod.ModMetadata.Name}");
+        //            mod.Status = ModStatus.NameConflict;
+        //        }
+        //    }
+        //}
         #endregion
 
         #region Patch
-        private static void EnableAllMods(List<ModEntry> mods)
+        private static void EnableAllMods(List<ModContainer> mods)
         {
             foreach (var mod in mods.Where(m => m.Status == ModStatus.Inactive && m.ModMetadata.Enabled))
             {
@@ -265,7 +232,7 @@ namespace ACE.Server.Mod
             }
         }
 
-        public static void EnableMod(ModEntry mod)
+        public static void EnableMod(ModContainer mod)
         {
             try
             {
@@ -275,13 +242,13 @@ namespace ACE.Server.Mod
                     return;
                 }
 
-                if (mod.ModInstance is null)
+                if (mod.Instance is null)
                 {
-                    mod.ModInstance = Activator.CreateInstance(mod.ModType) as IHarmonyMod;
+                    mod.Instance = Activator.CreateInstance(mod.ModType) as IHarmonyMod;
                     log.Info($"Created instance of {mod.ModType.Name}");
                 }
 
-                mod.ModInstance?.Initialize();
+                mod.Instance?.Initialize();
                 mod.Status = ModStatus.Active;
 
                 log.Info($"Activated mod `{mod.ModMetadata.Name} (v{mod.ModMetadata.Version})`.");
@@ -310,7 +277,7 @@ namespace ACE.Server.Mod
             }
         }
 
-        private static void UnpatchMod(ModEntry mod)
+        private static async void UnpatchMod(ModContainer mod)
         {
             try
             {
@@ -320,7 +287,8 @@ namespace ACE.Server.Mod
                     return;
                 }
 
-                mod.ModInstance?.Shutdown();
+                //mod.Instance?.Shutdown();
+                mod.Instance?.Dispose();
                 mod.Status = ModStatus.Inactive;
                 log.Info($"Unpatching {mod.ModMetadata.Name}");
             }
@@ -329,6 +297,10 @@ namespace ACE.Server.Mod
                 log.Error($"Error unpatching {mod.ModMetadata.Name}: {ex}");
             }
         }
+        #endregion
+
+        #region Helpers
+
         #endregion
 
         #region Hot Reload
@@ -340,78 +312,34 @@ namespace ACE.Server.Mod
 
         //Version = ServerBuildInfo.GetVersionInfo()
 
-        private static void PluginWatcher_Changed(object sender, FileSystemEventArgs e)
+        public static void Start()
         {
-            try
-            {
-                if (!HotReloadEnabled)
-                    return;
-                if (needsReload == false)
-                {
-                    //Start reload
-                    //Core.RenderFrame += Core_RenderFrame;
-                }
-                needsReload = true;
-                //Gate by time?
-                lastFileChange = DateTime.UtcNow;
-            }
-            catch (Exception ex) { }
+            var loader = PluginLoader.CreateFromAssemblyFile(ModDirectory,
+                config => config.EnableHotReload = true);
+
+            loader.Reloaded += ShowPluginInfo;
+
+            var cts = new CancellationTokenSource();
         }
 
-        private static void LoadPluginAssembly()
+        static void ShowPluginInfo(object sender, PluginReloadedEventArgs eventArgs)
         {
-            try
-            {
-                if (HotReloadEnabled && PluginWatcher == null)
-                {
-                    PluginWatcher = new FileSystemWatcher();
-                    PluginWatcher.Path = ModDirectory;
-                    PluginWatcher.NotifyFilter = NotifyFilters.LastAccess | NotifyFilters.LastWrite;
-                    PluginWatcher.Filter = "*.dll"; //Todo: rethink this
-                    PluginWatcher.Changed += PluginWatcher_Changed;
-                    PluginWatcher.EnableRaisingEvents = true;
-                }
-                //Check for whether mod is loaded?
-                //if (PluginInstance != null)
-                //{
-                //    LogError("************* Attempt to LoadPluginAssembly() when PluginInstance != null! ***************");
-                //    UnloadPluginAssembly();
-                //}
-
-                //var assemblyPath = System.IO.File.ReadAllBytes(PluginAssemblyPath);
-                //var pdbPath = System.IO.File.ReadAllBytes(PluginAssemblyPath.Replace(".dll", ".pdb"));
-                //CurrentAssembly = Assembly.Load(assemblyPath, pdbPath);
-                //PluginType = CurrentAssembly.GetType(PluginAssemblyNamespace);
-                //MethodInfo startupMethod = PluginType.GetMethod("Startup");
-                //PluginInstance = Activator.CreateInstance(PluginType);
-                //startupMethod.Invoke(PluginInstance, new object[] {
-                //    PluginAssemblyPath,
-                //    Global.PluginStorageDirectory.Value,
-                //    Global.DatabaseFile.Value,
-                //    Host,
-                //    Core
-                //});
-
-                //hasLoaded = true;
-            }
-            catch (Exception ex) { }
+            Console.ForegroundColor = ConsoleColor.Blue;
+            Console.Write("HotReloadApp: ");
+            Console.ResetColor();
+            Console.WriteLine("plugin was reloaded");
+            InvokePlugin(eventArgs.Loader);
         }
 
-        private static void UnloadPluginAssembly()
+        static void InvokePlugin(PluginLoader loader)
         {
-            try
-            {
-                //if (PluginInstance != null && PluginType != null)
-                //{
-                //    MethodInfo shutdownMethod = PluginType.GetMethod("Shutdown");
-                //    shutdownMethod.Invoke(PluginInstance, null);
-                //    PluginInstance = null;
-                //    CurrentAssembly = null;
-                //    PluginType = null;
-                //}
-            }
-            catch (Exception ex) { }
+            var assembly = loader.LoadDefaultAssembly();
+            assembly
+                .GetType("TimestampedPlugin.InfoDisplayer", throwOnError: true)
+                !.GetMethod("Print")
+                !.Invoke(null, null);
         }
+
         #endregion
 
         //Shutdown
@@ -420,11 +348,6 @@ namespace ACE.Server.Mod
         public static void Log(string message)
         {
             log.Info(message);
-        }
-
-        public static void Test()
-        {
-            Console.WriteLine("Test");
         }
     }
 }

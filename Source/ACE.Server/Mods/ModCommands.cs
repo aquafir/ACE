@@ -31,12 +31,16 @@ namespace ACE.Server.Command.Handlers
 
         [CommandHandler("enablemod", AccessLevel.Developer, CommandHandlerFlag.None, 1,
             "Loads mods from the mod folder and enables active ones.")]
+        [CommandHandler("em", AccessLevel.Developer, CommandHandlerFlag.None, 1,
+            "Loads mods from the mod folder and enables active ones.")]
         public static void HandleEnableMod(Session session, params string[] parameters)
         {
             ModManager.EnableModByName(parameters[0]);
         }
 
         [CommandHandler("disablemod", AccessLevel.Developer, CommandHandlerFlag.None, 1,
+            "Loads mods from the mod folder and enables active ones.")]
+        [CommandHandler("dm", AccessLevel.Developer, CommandHandlerFlag.None, 1,
             "Loads mods from the mod folder and enables active ones.")]
         public static void HandleDisableMod(Session session, params string[] parameters)
         {
@@ -45,8 +49,11 @@ namespace ACE.Server.Command.Handlers
 
         [CommandHandler("test", AccessLevel.Developer, CommandHandlerFlag.None, 0,
             "Loads mods from the mod folder and enables active ones.")]
+        [CommandHandler("t", AccessLevel.Developer, CommandHandlerFlag.None, 0,
+            "Loads mods from the mod folder and enables active ones.")]
         public static void HandleTest(Session session, params string[] parameters)
         {
+            ModManager.Test(3);
             ModManager.Test();
         }
     }

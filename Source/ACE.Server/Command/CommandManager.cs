@@ -30,6 +30,84 @@ namespace ACE.Server.Command
             return commandHandlers.Select(p => p.Value).Where(p => p.Attribute.Command == commandname);
         }
 
+        public static void AddCommand(CommandHandlerInfo commandHandler, bool overrides = false)
+        {
+            if (commandHandler is null)
+                return;
+
+            var command = commandHandler.Attribute.Command;
+                if (commandHandlers.ContainsKey(command) && !overrides)
+                {
+                    log.Info($"Command {command} already exists.");
+                }
+                else
+                {
+                    commandHandlers[command] = commandHandler;
+                    log.Info($"Command {command} created.");
+                }
+        }
+
+        public static void RemoveCommand(CommandHandlerInfo commandHandler)
+        {
+            if (commandHandler is null)
+                return;
+
+            var command = commandHandler.Attribute.Command;
+                if (commandHandlers.ContainsKey(command))
+                {
+                    log.Info($"Command {command} removed.");
+                    commandHandlers.Remove(command);
+                }
+                else
+                {
+                    log.Info($"Command {command} already removed.");
+                }
+        }
+
+        public static void AddCommand(MethodInfo method, bool overrides = false)
+        {
+            if (method is null)
+                return;
+
+            foreach (var attribute in method?.GetCustomAttributes<CommandHandlerAttribute>())
+            {
+                var commandHandler = new CommandHandlerInfo()
+                {
+                    Handler = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), method),
+                    Attribute = attribute
+                };
+
+                if (commandHandlers.ContainsKey(attribute.Command) && !overrides)
+                {
+                    log.Info($"Command {attribute.Command} already exists.");
+                }
+                else
+                {
+                    commandHandlers[attribute.Command] = commandHandler;
+                    log.Info($"Command {attribute.Command} created.");
+                }
+            }
+        }
+
+        public static void RemoveCommand(MethodInfo method)
+        {
+            if (method is null)
+                return;
+
+            foreach (var attribute in method?.GetCustomAttributes<CommandHandlerAttribute>())
+            {
+                if (commandHandlers.ContainsKey(attribute.Command))
+                {
+                    log.Info($"Command {attribute.Command} removed.");
+                    commandHandlers.Remove(attribute.Command);
+                }
+                else
+                {
+                    log.Info($"Command {attribute.Command} already removed.");
+                }
+            }
+        }
+
         public static void Initialize()
         {
             commandHandlers = new Dictionary<string, CommandHandlerInfo>(StringComparer.OrdinalIgnoreCase);

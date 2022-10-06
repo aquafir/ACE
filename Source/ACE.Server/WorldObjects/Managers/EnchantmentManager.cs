@@ -1145,7 +1145,16 @@ namespace ACE.Server.WorldObjects.Managers
             }
             var rating = (int)Math.Round(totalBaseDamage / 8.0f);   // thanks to Xenocide for this formula!
             //Console.WriteLine($"{WorldObject.Name}.NetherDotDamageRating: {rating}");
-            return rating;
+
+            //More "top" nether DoTs should allow a larger debuff
+            var softCap = 10 * netherDots.Count;
+
+            //If the rating is below the soft cap use it
+            if(rating < softCap)
+                return rating;
+
+            //Otherwise factor in a much slower bonus based on damage
+            return softCap + (int)Math.Sqrt(totalBaseDamage / 80);
         }
 
         /// <summary>

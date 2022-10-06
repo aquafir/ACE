@@ -12,6 +12,7 @@
     <Description>Asheron's Call server emulator</Description>
     <Company>ACEmulator</Company>
     <Version>1.0.0</Version>
+    <Configurations>Debug;Release;Fast</Configurations>
   </PropertyGroup>
 
   <ItemGroup>

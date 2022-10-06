@@ -4,6 +4,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net6.0</TargetFramework>
     <Platforms>x64</Platforms>
+    <Configurations>Debug;Release;Fast</Configurations>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -237,6 +238,7 @@
     <PackageReference Include="Lib.Harmony" Version="2.2.2" />
     <PackageReference Include="log4net" Version="2.0.14" />
     <PackageReference Include="Log4Net.Async.Standard" Version="3.1.0" />
+    <PackageReference Include="McMaster.NETCore.Plugins" Version="1.4.0" />
     <PackageReference Include="MySql.Data" Version="8.0.29" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
     <PackageReference Include="System.Text.Encoding.CodePages" Version="6.0.0" />
@@ -248,6 +250,7 @@
     <ProjectReference Include="..\ACE.Database\ACE.Database.csproj" />
     <ProjectReference Include="..\ACE.DatLoader\ACE.DatLoader.csproj" />
     <ProjectReference Include="..\ACE.Entity\ACE.Entity.csproj" />
+    <ProjectReference Include="..\ACE.Mod\ACE.Mod.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -286,6 +289,10 @@
     <None Include="..\..\Database\Base\**" CopyToOutputDirectory="PreserveNewest" LinkBase="DatabaseSetupScripts\Base\" />
     <None Include="..\..\Database\Updates\**" CopyToOutputDirectory="PreserveNewest" LinkBase="DatabaseSetupScripts\Updates\" />
     <None Include="..\..\Database\Optional\**" CopyToOutputDirectory="PreserveNewest" LinkBase="DatabaseSetupScripts\Optional\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Mods\IHarmonyMod.cs" />
   </ItemGroup>
 
   <Target Name="ChangeAliasesOfStrongNameAssemblies" BeforeTargets="FindReferenceAssembliesForReferences;ResolveReferences">
