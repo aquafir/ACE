@@ -1,5 +1,7 @@
 using ACE.Mod;
 using ACE.Server.Command;
+using ACE.Server.Managers;
+using ACE.Server.WorldObjects;
 using HarmonyLib;
 using log4net;
 using McMaster.NETCore.Plugins;
@@ -11,6 +13,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Metadata.Ecma335;
 using System.Threading;
 
 namespace ACE.Server.Mod
@@ -25,6 +28,7 @@ namespace ACE.Server.Mod
         /// Mods with at least metadata loaded
         /// </summary>
         private static List<ModContainer> _mods = new();
+        public static List<ModContainer> Mods => _mods;
 
         public static void Initialize() {
             FindMods();
@@ -300,7 +304,31 @@ namespace ACE.Server.Mod
         #endregion
 
         #region Helpers
+        //public static ModContainer GetModContainer(IHarmonyMod mod)
+        //{
+        //    ModContainer container;
 
+        //}
+
+        public static string GetFolder(IHarmonyMod mod)
+        {
+            var match = Mods.Where(x => x.Instance == mod).FirstOrDefault();
+            return match is null ? "" : match.FolderPath;
+        }
+
+        public static void Log(string message)
+        {
+            log.Info(message);
+        }
+
+        public static void Message(string name, string message)
+        {
+            var player = PlayerManager.FindByName(name, out bool online);
+            if(online)
+            {
+                ((Player)player).SendMessage(message);
+            }
+        }
         #endregion
 
         #region Hot Reload
@@ -344,10 +372,5 @@ namespace ACE.Server.Mod
 
         //Shutdown
         //ServerManager.ShutdownServer
-
-        public static void Log(string message)
-        {
-            log.Info(message);
-        }
     }
 }

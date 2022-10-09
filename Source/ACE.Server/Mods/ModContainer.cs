@@ -50,6 +50,8 @@ namespace ACE.Server.Mod
         {
             //Todo: checks n all that jazz
 
+            //Watching for changes in the dll might be needed if it has unreleased resources?
+            //https://github.com/natemcmaster/DotNetCorePlugins/issues/86
             _dllWatcher = new FileSystemWatcher()
             {
                 Path = FolderPath,
@@ -78,21 +80,26 @@ namespace ACE.Server.Mod
 
             log.Info($"Set up {FolderName}");
 
-            Start();
+            Restart();
         }
 
-        private void Start()
+        public void Restart()
         {
-            CreateModInstance();
-            EnableMod();
+            Shutdown();
+            //CreateModInstance();  //moved to enable
+            Enable();
         }
 
-        private void Shutdown()
+        public void Shutdown()
         {
+            if (Instance is null)
+                return;
+
             log.Info($"{FolderName} shutting down @ {DateTime.Now}");
             Instance?.Dispose();
             Instance = null;
-            Status = ModStatus.Unloaded;
+            //Status = ModStatus.Unloaded;
+            Status = ModStatus.Inactive;
         }
 
         private void CreateModInstance()
@@ -117,9 +124,6 @@ namespace ACE.Server.Mod
                 //Safer to use the dll to get the type than using convention
                 ModType = ModAssembly.GetType(TypeName);
 
-                //Non-explicit version with possibility of IHarmonyMod types
-                //var types = ModAssembly.GetTypes().Where(t => typeof(IHarmonyMod).IsAssignableFrom(t) && !t.IsAbstract).ToList();
-
                 if (ModType is null)
                 {
                     Status = ModStatus.LoadFailure;
@@ -137,16 +141,20 @@ namespace ACE.Server.Mod
             }
         }
 
-        private void EnableMod()
+        public void Enable()
         {
             try
             {
+                CreateModInstance();    //todo rethink all this
+
+                //Only mods with loaded assemblies that aren't active can be enabled
                 if (Status != ModStatus.Inactive)
                 {
-                    log.Info($"Skipping already active mod: {ModMetadata.Name}");
+                    log.Info($"{ModMetadata.Name} is not inactive.");
                     return;
                 }
 
+                //Create an instance if needed
                 if (Instance is null)
                 {
                     Instance = Activator.CreateInstance(ModType) as IHarmonyMod;
@@ -161,11 +169,9 @@ namespace ACE.Server.Mod
             catch (Exception ex)
             {
                 log.Error($"Error patching {ModMetadata.Name}: {ex}");
+                Status = ModStatus.Inactive;    //Todo: what status?  Something to prevent reload attempts?
             }
-
         }
-
-
 
         #region Events
         //If Loader has hot reload enabled this triggers after the assembly is loaded again (after GC)
@@ -174,15 +180,13 @@ namespace ACE.Server.Mod
             var lapsed = DateTime.Now - _lastChange;
             if (lapsed < RELOAD_TIMEOUT)
             {
-                //log.Info($"Not reloading {FolderName}: {lapsed.TotalSeconds}/{RELOAD_TIMEOUT.TotalSeconds}");
-                //return;
-                Shutdown();
+                log.Info($"Not reloading {FolderName}: {lapsed.TotalSeconds}/{RELOAD_TIMEOUT.TotalSeconds}");
+                return;
+                //Shutdown();
             }
 
-            Start();
+            Restart();
             log.Info($"Reloaded {FolderName} @ {DateTime.Now} after {lapsed.TotalSeconds}/{RELOAD_TIMEOUT.TotalSeconds} seconds");
-
-            //log.Info($"Reloaded {FolderPath}");
         }
 
 
@@ -207,8 +211,8 @@ namespace ACE.Server.Mod
     public enum ModStatus
     {
         Unloaded,	        //Assembly not loaded
-        Active,		        //Loaded and active
         Inactive,           //Loaded and activatable
+        Active,		        //Loaded and active
         LoadFailure,        //Failed to load assembly
         //NameConflict,       //Mod loaded but a higher priority mod has the same name
         //MissingDependency,  //Keeping it simple for now

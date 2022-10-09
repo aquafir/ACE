@@ -15,12 +15,5 @@ namespace ACE.Mod
         //https://github.com/natemcmaster/DotNetCorePlugins#what-is-a-shared-type
 
         void Initialize();
-        //void Shutdown();
-        //void Patch();
-        //void Unpatch();
-        //void Reset();
-        //Harmony Harmony { get; }
-        //MethodInfo[] CustomMethods();
-
     }
 }
