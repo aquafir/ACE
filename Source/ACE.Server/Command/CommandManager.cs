@@ -30,7 +30,7 @@ namespace ACE.Server.Command
             return commandHandlers.Select(p => p.Value).Where(p => p.Attribute.Command == commandname);
         }
 
-        public static void AddCommand(CommandHandlerInfo commandHandler, bool overrides = false)
+        public static void TryAddCommand(CommandHandlerInfo commandHandler, bool overrides = false)
         {
             if (commandHandler is null)
                 return;

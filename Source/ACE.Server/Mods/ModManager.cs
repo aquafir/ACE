@@ -14,6 +14,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Metadata.Ecma335;
+using System.Security.AccessControl;
 using System.Threading;
 
 namespace ACE.Server.Mod
@@ -152,9 +153,18 @@ namespace ACE.Server.Mod
         private static List<ModContainer> LoadAllMetadata(string directory)
         {
             var loadedMods = new List<ModContainer>();
+            var directories = Directory.GetDirectories(directory);
 
-            //Structure is /modDir/<AssemblyName>/<AssemblyName.dll> and Meta.json
-            foreach (var modDir in Directory.GetDirectories(directory))
+            //Check for missing and shut them down
+            //foreach (var mod in Mods.Where(x => !directories.Contains(x.FolderPath))) {
+            //    log.Info($"Shutting down mod {mod.ModMetadata.Name} with missing folder:\r\n\t{mod.FolderPath}");
+            //    mod.Shutdown();
+            //}
+            //Mods.RemoveAll(x => !directories.Contains(x.FolderPath));
+
+            //Check already loaded?
+            //Structure is /<ModDir>/<AssemblyName>/<AssemblyName.dll> and Meta.json
+            foreach (var modDir in directories)
             {
                 var metadataPath = Path.Combine(modDir, ModMetadata.FILENAME);
 
@@ -304,11 +314,11 @@ namespace ACE.Server.Mod
         #endregion
 
         #region Helpers
-        //public static ModContainer GetModContainer(IHarmonyMod mod)
-        //{
-        //    ModContainer container;
+        public static ModContainer GetModContainerByName(string name) =>
+            Mods.Where(x => x.ModMetadata.Name == name).FirstOrDefault();
 
-        //}
+        public static ModContainer GetModContainerByPath(string path) =>
+            Mods.Where(x => x.FolderPath == path).FirstOrDefault();
 
         public static string GetFolder(IHarmonyMod mod)
         {
@@ -329,45 +339,6 @@ namespace ACE.Server.Mod
                 ((Player)player).SendMessage(message);
             }
         }
-        #endregion
-
-        #region Hot Reload
-        private static readonly bool HotReloadEnabled = true;
-        public static FileSystemWatcher PluginWatcher = null;
-        private static bool needsReload;
-        private static DateTime lastFileChange;
-        //System.Resources.ResourceManager rm = new System.Resources.ResourceManager(GetType().Namespace + ".Properties.Resources", System.Reflection.Assembly.GetExecutingAssembly());
-
-        //Version = ServerBuildInfo.GetVersionInfo()
-
-        public static void Start()
-        {
-            var loader = PluginLoader.CreateFromAssemblyFile(ModDirectory,
-                config => config.EnableHotReload = true);
-
-            loader.Reloaded += ShowPluginInfo;
-
-            var cts = new CancellationTokenSource();
-        }
-
-        static void ShowPluginInfo(object sender, PluginReloadedEventArgs eventArgs)
-        {
-            Console.ForegroundColor = ConsoleColor.Blue;
-            Console.Write("HotReloadApp: ");
-            Console.ResetColor();
-            Console.WriteLine("plugin was reloaded");
-            InvokePlugin(eventArgs.Loader);
-        }
-
-        static void InvokePlugin(PluginLoader loader)
-        {
-            var assembly = loader.LoadDefaultAssembly();
-            assembly
-                .GetType("TimestampedPlugin.InfoDisplayer", throwOnError: true)
-                !.GetMethod("Print")
-                !.Invoke(null, null);
-        }
-
         #endregion
 
         //Shutdown

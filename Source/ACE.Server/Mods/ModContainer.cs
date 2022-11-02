@@ -23,7 +23,6 @@ namespace ACE.Server.Mod
         public Type ModType { get; set; }
         public IHarmonyMod Instance { get; set; }
 
-
         // C:\ACE\Mods\SomeMod
         public string FolderPath { get; set; }
         // SomeMod

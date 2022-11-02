@@ -10,6 +10,9 @@ using ACE.Server.Network;
 using ACE.Server.Mod;
 using ACE.Adapter.GDLE.Models;
 using System.Linq;
+using ACE.Server.WorldObjects;
+using HarmonyLib;
+using System.Text;
 
 namespace ACE.Server.Command.Handlers
 {
@@ -24,7 +27,9 @@ namespace ACE.Server.Command.Handlers
             Disable, D = Disable,
             Toggle, T = Toggle,
             Restart, R = Restart,
+            Method, M = Method
         }
+
         [CommandHandler("mod", AccessLevel.Developer, CommandHandlerFlag.None, -1,
             "Manage mods the lazy way")]
         public static void HandleListMods(Session session, params string[] parameters)
@@ -82,6 +87,28 @@ namespace ACE.Server.Command.Handlers
                         Log($"{meta.Name} is {(meta.Enabled ? "Enabled" : "Disabled")}\n\tSource: {mod.FolderPath}\n\tStatus: {mod.Status}", session);
                     }
                     return;
+                case ModCommand.Method:
+                    if (parameters.Length < 3)
+                        return;
+
+                    var type = AccessTools.TypeByName(parameters[1]);
+                    var method = parameters[2];
+                    if (type is null || method is null)
+                        return;
+                    var mcMethod = AccessTools.FirstMethod(type, m=> m.Name.Contains(method));
+
+                    const int spacing = -40;
+                    var sb = new StringBuilder($"Method {mcMethod.Name} found:");
+
+                    foreach (var param in mcMethod.GetParameters())
+                    {
+                        sb.AppendLine($"Name: {param.Name,spacing}\r\nType: {param.ParameterType,spacing}\r\nDflt: {param.DefaultValue,spacing}\r\n");
+                    }
+                    Log(sb.ToString(), session);
+
+                    //var mcPrefix = SymbolExtensions.GetMethodInfo(() => PatchClass.MagicCritPrefix);
+
+                    return;
             }
 
             ModManager.ListMods();
@@ -92,10 +119,9 @@ namespace ACE.Server.Command.Handlers
         || x.TypeName.Contains(name, StringComparison.InvariantCultureIgnoreCase)
         ).FirstOrDefault();
 
-
         private static void Log(string message, Session session)
         {
-            if (session.Player is not null)
+            if (session?.Player is not null)
                 session.Player.SendMessage(message);
             Console.WriteLine(message);
         }
