@@ -15,9 +15,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Reflection.Metadata.Ecma335;
-using System.Runtime.CompilerServices;
-using System.Security.AccessControl;
 using System.Threading;
 
 namespace ACE.Server.Mod
@@ -273,8 +270,27 @@ namespace ACE.Server.Mod
         }
         #endregion
 
-        #region Commands
+        #region Helpers
 
+        public static string GetFolder(IHarmonyMod mod)
+        {
+            var match = Mods.Where(x => x.Instance == mod).FirstOrDefault();
+            return match is null ? "" : match.FolderPath;
+        }
+
+        public static void Log(string message)
+        {
+            log.Info(message);
+        }
+
+        public static void Message(string name, string message)
+        {
+            var player = PlayerManager.FindByName(name, out bool online);
+            if(online)
+            {
+                ((Player)player).SendMessage(message);
+            }
+        }
         #endregion
 
         #region Helpers
@@ -346,28 +362,12 @@ namespace ACE.Server.Mod
         public static ModContainer GetModContainerByPath(string path) =>
             Mods.Where(x => x.FolderPath == path).FirstOrDefault();
 
-        public static string GetFolder(IHarmonyMod mod)
-        {
-            var match = Mods.Where(x => x.Instance == mod).FirstOrDefault();
-            return match is null ? "" : match.FolderPath;
-        }
+        //Shutdown
+        //ServerManager.ShutdownServer
 
         public static void Log(string message)
         {
             log.Info(message);
         }
-
-        public static void Message(string name, string message)
-        {
-            var player = PlayerManager.FindByName(name, out bool online);
-            if(online)
-            {
-                ((Player)player).SendMessage(message);
-            }
-        }
-        #endregion
-
-        //Shutdown
-        //ServerManager.ShutdownServer
     }
 }
