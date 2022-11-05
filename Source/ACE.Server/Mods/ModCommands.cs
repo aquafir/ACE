@@ -13,6 +13,7 @@ using System.Linq;
 using ACE.Server.WorldObjects;
 using HarmonyLib;
 using System.Text;
+using System.ComponentModel;
 
 namespace ACE.Server.Command.Handlers
 {
@@ -95,7 +96,7 @@ namespace ACE.Server.Command.Handlers
                     var method = parameters[2];
                     if (type is null || method is null)
                         return;
-                    var mcMethod = AccessTools.FirstMethod(type, m=> m.Name.Contains(method));
+                    var mcMethod = AccessTools.FirstMethod(type, m => m.Name.Contains(method));
 
                     const int spacing = -40;
                     var sb = new StringBuilder($"Method {mcMethod.Name} found:");

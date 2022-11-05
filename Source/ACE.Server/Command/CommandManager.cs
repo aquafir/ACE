@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -30,82 +31,69 @@ namespace ACE.Server.Command
             return commandHandlers.Select(p => p.Value).Where(p => p.Attribute.Command == commandname);
         }
 
-        public static void TryAddCommand(CommandHandlerInfo commandHandler, bool overrides = false)
+        public static CommandHandler GetDelegate(Action<Session, string[]> handler) => (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), handler.Method);
+
+        public static bool TryAddCommand(MethodInfo handler, string command, AccessLevel access, CommandHandlerFlag flags = CommandHandlerFlag.None, string description = "", string usage = "", bool overrides = true)
+        {
+            var del = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), handler);
+
+            var info = new CommandHandlerInfo()
+            {
+                Attribute = new CommandHandlerAttribute(command, access, flags, description, usage),
+                Handler = del,
+            };
+            return TryAddCommand(info, overrides);
+        }
+
+
+        public static bool TryAddCommand(Action<Session, string[]> handler, string command, AccessLevel access, CommandHandlerFlag flags = CommandHandlerFlag.None, string description = "", string usage = "", bool overrides = true)
+        {
+            var del = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), handler.Method);
+            var info = new CommandHandlerInfo()
+            {
+                Attribute = new CommandHandlerAttribute(command, access, flags, description, usage),
+                Handler = del
+            };
+
+            if (TryAddCommand(info, overrides))
+                return true;
+
+            return false;
+        }
+
+        public static bool TryAddCommand(CommandHandlerInfo commandHandler, bool overrides = true)
         {
             if (commandHandler is null)
-                return;
+                return false;
 
             var command = commandHandler.Attribute.Command;
-                if (commandHandlers.ContainsKey(command) && !overrides)
-                {
-                    log.Info($"Command {command} already exists.");
-                }
-                else
-                {
-                    commandHandlers[command] = commandHandler;
-                    log.Info($"Command {command} created.");
-                }
-        }
 
-        public static void RemoveCommand(CommandHandlerInfo commandHandler)
-        {
-            if (commandHandler is null)
-                return;
-
-            var command = commandHandler.Attribute.Command;
-                if (commandHandlers.ContainsKey(command))
-                {
-                    log.Info($"Command {command} removed.");
-                    commandHandlers.Remove(command);
-                }
-                else
-                {
-                    log.Info($"Command {command} already removed.");
-                }
-        }
-
-        public static void AddCommand(MethodInfo method, bool overrides = false)
-        {
-            if (method is null)
-                return;
-
-            foreach (var attribute in method?.GetCustomAttributes<CommandHandlerAttribute>())
+            //Add if the command doesn't exist
+            if (!commandHandlers.ContainsKey(command))
             {
-                var commandHandler = new CommandHandlerInfo()
-                {
-                    Handler = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), method),
-                    Attribute = attribute
-                };
-
-                if (commandHandlers.ContainsKey(attribute.Command) && !overrides)
-                {
-                    log.Info($"Command {attribute.Command} already exists.");
-                }
-                else
-                {
-                    commandHandlers[attribute.Command] = commandHandler;
-                    log.Info($"Command {attribute.Command} created.");
-                }
+                commandHandlers.Add(command, commandHandler);
+                log.Info($"Command created: {command}");
+                return true;
             }
+            //Update if overriding and the command exists
+            else if (overrides)
+            {
+                log.Info($"Command updated: {command}");
+                commandHandlers[command] = commandHandler;
+                return true;
+            }
+            log.Warn($"Failed to add command: {command}");
+            return false;
         }
 
-        public static void RemoveCommand(MethodInfo method)
+        public static bool TryRemoveCommand(string command)
         {
-            if (method is null)
-                return;
+            if (!commandHandlers.ContainsKey(command))
+                return false;
 
-            foreach (var attribute in method?.GetCustomAttributes<CommandHandlerAttribute>())
-            {
-                if (commandHandlers.ContainsKey(attribute.Command))
-                {
-                    log.Info($"Command {attribute.Command} removed.");
-                    commandHandlers.Remove(attribute.Command);
-                }
-                else
-                {
-                    log.Info($"Command {attribute.Command} already removed.");
-                }
-            }
+            log.Info($"Removed command: {command}");
+            commandHandlers.Remove(command);
+            return true;
         }
 
         public static void Initialize()
@@ -148,7 +136,7 @@ namespace ACE.Server.Command
             Console.WriteLine("Type \"acecommands\" for help.");
             Console.WriteLine("");
 
-            for (;;)
+            for (; ; )
             {
                 Console.Write("ACE >> ");
 
@@ -212,11 +200,11 @@ namespace ACE.Server.Command
                 parameters = null;
                 return;
             }
-            var commandSplit = commandLine.Split(' ',StringSplitOptions.RemoveEmptyEntries);
+            var commandSplit = commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             command = commandSplit[0];
 
             // remove leading '/' or '@' if erroneously entered in console
-            if(command.StartsWith("/") || command.StartsWith("@"))
+            if (command.StartsWith("/") || command.StartsWith("@"))
                 command = command.Substring(1);
 
             parameters = new string[commandSplit.Length - 1];
@@ -305,7 +293,7 @@ namespace ACE.Server.Command
             {
                 bool isAdvocate = session.Player.IsAdvocate;
                 bool isSentinel = session.Player.IsSentinel;
-                bool isEnvoy = session.Player.IsEnvoy; 
+                bool isEnvoy = session.Player.IsEnvoy;
                 bool isArch = session.Player.IsArch;
                 bool isAdmin = session.Player.IsAdmin;
 

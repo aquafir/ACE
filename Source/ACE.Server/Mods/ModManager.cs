@@ -1,6 +1,8 @@
+using ACE.Entity.Enum;
 using ACE.Mod;
 using ACE.Server.Command;
 using ACE.Server.Managers;
+using ACE.Server.Network;
 using ACE.Server.WorldObjects;
 using HarmonyLib;
 using log4net;
@@ -14,6 +16,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Metadata.Ecma335;
+using System.Runtime.CompilerServices;
 using System.Security.AccessControl;
 using System.Threading;
 
@@ -40,7 +43,7 @@ namespace ACE.Server.Mod
             log.Info($"Test {i}");
             return true;
         }
-        
+
 
         public static void ListMods()
         {
@@ -81,7 +84,7 @@ namespace ACE.Server.Mod
             }
 
             var entries = LoadAllMetadata(directory);
-            foreach(var entry in entries)
+            foreach (var entry in entries)
             {
                 LoadMod(entry);
             }
@@ -97,52 +100,9 @@ namespace ACE.Server.Mod
             var folderName = new DirectoryInfo(entry.FolderPath).Name;
             var dllPath = Path.Combine(entry.FolderPath, folderName + ".dll");
 
-
             //entry.
             entry.Initialize();
             return;
-
-            //if (!File.Exists(dllPath))
-            //{
-            //    log.Warn($"Nothing loaded for missing mod: {dllPath}");
-            //    return;
-            //}
-
-            ////Todo: decide if assemblies should be loaded if mods are inactive.  Currently using Unloaded
-            //if (!entry.ModMetadata.Enabled)
-            //{
-            //    log.Info($"Nothing loaded for disabled mod: {dllPath}");
-            //    return;
-            //}
-
-            //try
-            //{
-            //    //Todo: do this without locking dll for hot reload
-            //    var modDll = Assembly.UnsafeLoadFrom(dllPath);
-
-            //    //Non-explicit version with possibility of IHarmonyMod types
-            //    //var types = modDll.GetTypes();
-            //    //modTypes = modDll.GetTypes().Where(t => typeof(IHarmonyMod).IsAssignableFrom(t)).ToList();
-
-            //    //Safer to use the dll to get the type than using convention
-            //    var typeName = modDll.ManifestModule.ScopeName.Replace(".dll", "." + ModMetadata.TYPENAME);
-            //    entry.ModType = modDll.GetType(typeName);
-
-            //    if (entry.ModType is null)
-            //    {
-            //        entry.Status = ModStatus.LoadFailure;
-            //        log.Warn($"Missing IHarmonyMod Type {typeName} from {modDll}");
-            //    }
-            //    else
-            //    {
-            //        entry.Status = ModStatus.Inactive;
-            //    }
-            //}
-            //catch (Exception e)
-            //{
-            //    entry.Status = ModStatus.LoadFailure;
-            //    log.Error($"Failed to load mod file `{dllPath}`: {e}");
-            //}
         }
 
         /// <summary>
@@ -313,7 +273,73 @@ namespace ACE.Server.Mod
         }
         #endregion
 
+        #region Commands
+
+        #endregion
+
         #region Helpers
+        private static Dictionary<CommandHandlerInfo, Action<Session, string[]>> commands = new();
+        public static bool TryCreateCommand(MethodInfo method, string command)
+        {
+            var handler = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), method);
+            
+            var info = new CommandHandlerInfo()
+            {
+                Attribute = new CommandHandlerAttribute(command, AccessLevel.Player, CommandHandlerFlag.None),//, access, flags, description, usage),
+                Handler = handler
+            };
+
+            CommandManager.TryAddCommand(info);
+            return true;
+        }
+                                            
+        public static bool TryCreateCommand(Action<Session, string[]> handler,
+                                            string command,
+                                            //AccessLevel access,
+                                            //CommandHandlerFlag flags = CommandHandlerFlag.None,
+                                            //string description = "",
+                                            //string usage = "",
+                                            bool overrides = true)
+        {
+            //if(commands.ContainsKey(command) && !overrides)
+            //{
+            //        log.Warn($"Command already exists: {command} ");
+            //        return false;
+            //}
+            var commandHandler = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), handler.Method);
+            var info = new CommandHandlerInfo()
+            {
+                Attribute = new CommandHandlerAttribute(command, AccessLevel.Player, CommandHandlerFlag.None),//, access, flags, description, usage),
+                Handler = commandHandler
+            };
+            
+            if(CommandManager.TryAddCommand(info, overrides))
+            {
+                log.Info($"Created command: {command}");
+                return true;
+            }
+            else
+            {
+                log.Warn($"Command already exists: {command} ");
+                return false;
+            }
+        }
+        public static bool TryRemoveCommand(string command)
+        {
+            //Todo: decide about using something like handler.Method.GetParameters to allow overloading commands
+            return true;
+        }
+
+        public static CommandHandlerAttribute CreateHandlerAttribute(string command, AccessLevel accessLevel, CommandHandlerFlag flags = CommandHandlerFlag.None, string description = "", string usage = "")
+        {
+            return new CommandHandlerAttribute(command, accessLevel, flags, description, usage);
+        }
+
+        public static CommandHandlerInfo CreateHandlerInfo(CommandHandler handler)
+        {
+            return null;
+        }
+
         public static ModContainer GetModContainerByName(string name) =>
             Mods.Where(x => x.ModMetadata.Name == name).FirstOrDefault();
 
