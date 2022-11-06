@@ -14,6 +14,9 @@ using ACE.Server.WorldObjects;
 using HarmonyLib;
 using System.Text;
 using System.ComponentModel;
+using System.Diagnostics;
+using Discord.Rest;
+using System.IO;
 
 namespace ACE.Server.Command.Handlers
 {
@@ -28,44 +31,43 @@ namespace ACE.Server.Command.Handlers
             Restart, R = Restart,
             Method, M = Method,
             Find, F = Find,
+            Settings, S = Settings
         }
-        //static string USAGE = $"/mod {String.Join('|', Enum.GetNames(typeof(ModCommand)))}";
+        static string USAGE = $"/mod {String.Join('|', Enum.GetNames(typeof(ModCommand)))}";
 
         [CommandHandler("mod", AccessLevel.Developer, CommandHandlerFlag.None, -1,
             "Lazy mod control")]
         public static void HandleListMods(Session session, params string[] parameters)
         {
-            if (parameters.Length < 1 || !Enum.TryParse(typeof(ModCommand), parameters[0], true, out var verb)) return;
+            if (parameters.Length < 1 || !Enum.TryParse<ModCommand>(parameters[0], true, out ModCommand verb)) return;
 
             ModContainer match = null;
             if (parameters.Length > 1)
                 match = ModManager.GetModContainerByName(parameters[1]);
 
+            if (match is null && (verb == ModCommand.Enable || verb == ModCommand.Disable || verb == ModCommand.Toggle || verb == ModCommand.Restart || verb == ModCommand.Settings))
+            {
+                Log(USAGE, session);
+                return;
+            }
+
             switch (verb)
             {
                 case ModCommand.Enable:
-                    if (match is not null)
-                        EnableMod(session, match);
+                    EnableMod(session, match);
                     return;
                 case ModCommand.Disable:
-                    if (match is not null)
-                        DisableMod(session, match);
+                    DisableMod(session, match);
                     return;
                 case ModCommand.Restart:
-                    if (match is not null)
-                    {
-                        Log($"Restarting {match.ModMetadata.Name}", session);
-                        match.Restart();
-                    }
+                    Log($"Restarting {match.ModMetadata.Name}", session);
+                    match.Restart();
                     return;
                 case ModCommand.Toggle:
-                    if (match is not null)
-                    {
-                        if (match.Status == ModStatus.Inactive)
-                            EnableMod(session, match);
-                        else
-                            DisableMod(session, match);
-                    }
+                    if (match.Status == ModStatus.Inactive || match.Status == ModStatus.Unloaded)
+                        EnableMod(session, match);
+                    else if (match.Status == ModStatus.Active)
+                        DisableMod(session, match);
                     return;
 
                 //List mod status
@@ -99,9 +101,25 @@ namespace ACE.Server.Command.Handlers
                 case ModCommand.Find:
                     ModManager.FindMods();
                     return;
-            }
 
-            ModManager.ListMods();
+                //Lazy opening of mod settings
+                case ModCommand.Settings:
+                    var settingsPath = System.IO.Path.Combine(match.FolderPath, "Settings.json");
+
+                    if (!System.IO.File.Exists(settingsPath))
+                    {
+                        Log($"Settings missing: {settingsPath}", session);
+                        return;
+                    }
+
+                    using (var settings = new Process())
+                    {
+                        settings.StartInfo.FileName = "explorer";
+                        settings.StartInfo.Arguments = $"\"{settingsPath}\"";
+                        settings.Start();
+                    }
+                    return;
+            }
         }
 
         private static void DisableMod(Session session, ModContainer match)

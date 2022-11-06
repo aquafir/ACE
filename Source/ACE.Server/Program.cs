@@ -1,4 +1,4 @@
-#define FASTT
+#define FAST
 
 using System;
 using System.Globalization;
