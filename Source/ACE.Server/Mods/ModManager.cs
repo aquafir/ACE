@@ -27,8 +27,6 @@ namespace ACE.Server.Mod
     {
         private static readonly ILog log = LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
 
-        public static string ModDirectory { get; } = @"C:\ACE\Mods\";
-
         /// <summary>
         /// Mods with at least metadata loaded
         /// </summary>
@@ -54,14 +52,15 @@ namespace ACE.Server.Mod
         /// </summary>
         public static void FindMods()
         {
-            Mods = LoadModEntries(ModDirectory);
+            var s = Common.ConfigManager.Config.Server;
+            var m = s.ModsDirectory;
+            Mods = LoadModEntries(Common.ConfigManager.Config.Server.ModsDirectory);
             Mods = Mods.OrderByDescending(x => x.ModMetadata.Priority).ToList();
 
             //Todo: Filter out bad mods here or when loading entries?
             //CheckDuplicateNames(_mods);
 
             ListMods();
-            //EnableAllMods(ModManager._mods);
         }
 
         /// <summary>
