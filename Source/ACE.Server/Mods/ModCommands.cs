@@ -19,8 +19,6 @@ namespace ACE.Server.Command.Handlers
 {
     public static class ModCommands
     {
-        //private static readonly ILog log = LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
-
         enum ModCommand
         {
             List, L = List,
@@ -28,34 +26,30 @@ namespace ACE.Server.Command.Handlers
             Disable, D = Disable,
             Toggle, T = Toggle,
             Restart, R = Restart,
-            Method, M = Method
+            Method, M = Method,
+            Find, F = Find,
         }
+        //static string USAGE = $"/mod {String.Join('|', Enum.GetNames(typeof(ModCommand)))}";
 
         [CommandHandler("mod", AccessLevel.Developer, CommandHandlerFlag.None, -1,
-            "Manage mods the lazy way")]
+            "Lazy mod control")]
         public static void HandleListMods(Session session, params string[] parameters)
         {
             if (parameters.Length < 1 || !Enum.TryParse(typeof(ModCommand), parameters[0], true, out var verb)) return;
 
             ModContainer match = null;
             if (parameters.Length > 1)
-                match = GetModByName(parameters[1]);
+                match = ModManager.GetModContainerByName(parameters[1]);
 
             switch (verb)
             {
                 case ModCommand.Enable:
                     if (match is not null)
-                    {
-                        Log($"Enabling {match.ModMetadata.Name}", session);
-                        match.Enable();
-                    }
+                        EnableMod(session, match);
                     return;
                 case ModCommand.Disable:
                     if (match is not null)
-                    {
-                        Log($"Disabling {match.ModMetadata.Name}", session);
-                        match.Shutdown();
-                    }
+                        DisableMod(session, match);
                     return;
                 case ModCommand.Restart:
                     if (match is not null)
@@ -68,26 +62,18 @@ namespace ACE.Server.Command.Handlers
                     if (match is not null)
                     {
                         if (match.Status == ModStatus.Inactive)
-                        {
-                            Log($"Enabling {match.ModMetadata.Name}", session);
-                            match.Enable();
-                        }
+                            EnableMod(session, match);
                         else
-                        {
-                            Log($"Disabling {match.ModMetadata.Name}", session);
-                            match.Shutdown();
-                        }
+                            DisableMod(session, match);
                     }
                     return;
+
+                //List mod status
                 case ModCommand.List:
-                    if (ModManager.Mods.Count > 0)
-                        Log($"Displaying mods ({ModManager.Mods.Count})\n", session);
-                    foreach (var mod in ModManager.Mods)
-                    {
-                        var meta = mod.ModMetadata;
-                        Log($"{meta.Name} is {(meta.Enabled ? "Enabled" : "Disabled")}\n\tSource: {mod.FolderPath}\n\tStatus: {mod.Status}", session);
-                    }
+                    ModManager.ListMods(session?.Player);
                     return;
+
+                //Prints out some information about a method and its params/types
                 case ModCommand.Method:
                     if (parameters.Length < 3)
                         return;
@@ -107,18 +93,32 @@ namespace ACE.Server.Command.Handlers
                     }
                     Log(sb.ToString(), session);
 
-                    //var mcPrefix = SymbolExtensions.GetMethodInfo(() => PatchClass.MagicCritPrefix);
+                    return;
 
+                //Full reload
+                case ModCommand.Find:
+                    ModManager.FindMods();
                     return;
             }
 
             ModManager.ListMods();
         }
 
-        private static ModContainer GetModByName(string name) => ModManager.Mods.Where(x =>
-        x.ModMetadata.Name.Contains(name, StringComparison.InvariantCultureIgnoreCase)
-        || x.TypeName.Contains(name, StringComparison.InvariantCultureIgnoreCase)
-        ).FirstOrDefault();
+        private static void DisableMod(Session session, ModContainer match)
+        {
+            Log($"Disabling {match.ModMetadata.Name}", session);
+            match.Shutdown();
+            match.ModMetadata.Enabled = false;
+            match.SaveMetadata();
+        }
+
+        private static void EnableMod(Session session, ModContainer match)
+        {
+            Log($"Enabling {match.ModMetadata.Name}", session);
+            match.Enable();
+            match.ModMetadata.Enabled = true;
+            match.SaveMetadata();
+        }
 
         private static void Log(string message, Session session)
         {
@@ -126,39 +126,5 @@ namespace ACE.Server.Command.Handlers
                 session.Player.SendMessage(message);
             Console.WriteLine(message);
         }
-
-
-        [CommandHandler("findmods", AccessLevel.Developer, CommandHandlerFlag.None, 0,
-            "Finds mods with valid metadata in the mod folder.")]
-        public static void HandleFindMods(Session session, params string[] parameters)
-        {
-            ModManager.FindMods();
-        }
-
-        //[CommandHandler("listmods", AccessLevel.Developer, CommandHandlerFlag.None, 0,
-        //    "Lists available mods and their status.")]
-        //public static void HandleListMods(Session session, params string[] parameters)
-        //{
-
-        //    ModManager.ListMods();
-        //}
-
-        //[CommandHandler("enablemod", AccessLevel.Developer, CommandHandlerFlag.None, 1,
-        //    "Loads mods from the mod folder and enables active ones.")]
-        //[CommandHandler("em", AccessLevel.Developer, CommandHandlerFlag.None, 1,
-        //    "Loads mods from the mod folder and enables active ones.")]
-        //public static void HandleEnableMod(Session session, params string[] parameters)
-        //{
-        //    ModManager.EnableModByName(parameters[0]);
-        //}
-
-        //[CommandHandler("disablemod", AccessLevel.Developer, CommandHandlerFlag.None, 1,
-        //    "Loads mods from the mod folder and enables active ones.")]
-        //[CommandHandler("dm", AccessLevel.Developer, CommandHandlerFlag.None, 1,
-        //    "Loads mods from the mod folder and enables active ones.")]
-        //public static void HandleDisableMod(Session session, params string[] parameters)
-        //{
-        //    ModManager.UnpatchModByName(parameters[0]);
-        //}
     }
 }

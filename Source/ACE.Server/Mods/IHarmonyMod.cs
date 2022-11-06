@@ -1,12 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
-using System.Xml;
 
-namespace ACE.Mod
+namespace ACE.Server.Mod
 {
     /// <summary>
     /// Defines interactions between mods and their ACE.Server host
@@ -16,5 +14,8 @@ namespace ACE.Mod
         //https://github.com/natemcmaster/DotNetCorePlugins#what-is-a-shared-type
 
         void Initialize();
+
+        //Hack for handling chat commands?  Fails to give access to Session
+        //void Command(string command);
     }
 }

@@ -1,4 +1,4 @@
-#define FAST
+#define FASTT
 
 using System;
 using System.Globalization;
@@ -324,14 +324,12 @@ namespace ACE.Server
             for (int i = 0; i < 10; i++)
                 GC.Collect();
 
-            #if !FAST
             // This should be last
             log.Info("Initializing CommandManager...");
             CommandManager.Initialize();
 
             log.Info("Initializing ModManager...");
             ModManager.Initialize();
-            #endif
 
             if (!PropertyManager.GetBool("world_closed", false).Item)
             {

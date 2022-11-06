@@ -45,7 +45,6 @@ namespace ACE.Server.Command
             return TryAddCommand(info, overrides);
         }
 
-
         public static bool TryAddCommand(Action<Session, string[]> handler, string command, AccessLevel access, CommandHandlerFlag flags = CommandHandlerFlag.None, string description = "", string usage = "", bool overrides = true)
         {
             var del = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), handler.Method);

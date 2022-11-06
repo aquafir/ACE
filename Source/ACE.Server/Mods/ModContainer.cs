@@ -1,6 +1,6 @@
 using ACE.Adapter.GDLE.Models;
-using ACE.Mod;
 using ACE.Server.Command;
+using ACE.Server.Mod;
 using log4net;
 using McMaster.NETCore.Plugins;
 using System;
@@ -8,6 +8,9 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.Json.Serialization;
+using System.Text.Json;
+using Newtonsoft.Json;
 
 namespace ACE.Server.Mod
 {
@@ -68,7 +71,7 @@ namespace ACE.Server.Mod
             Loader = PluginLoader.CreateFromAssemblyFile(
                 assemblyFile: DllPath,
                 isUnloadable: true,
-                sharedTypes: new[] { typeof(IHarmonyMod) },
+                sharedTypes: new Type[] { },
                 configure: config =>
                 {
                     config.EnableHotReload = true;
@@ -95,6 +98,10 @@ namespace ACE.Server.Mod
                 return;
 
             log.Info($"{FolderName} shutting down @ {DateTime.Now}");
+
+            if (ModMetadata.RegisterCommands)
+                this.UnregisterCommandHandlers();
+
             Instance?.Dispose();
             Instance = null;
             //Status = ModStatus.Unloaded;
@@ -163,6 +170,9 @@ namespace ACE.Server.Mod
                 Instance?.Initialize();
                 Status = ModStatus.Active;
 
+                if (ModMetadata.RegisterCommands)
+                    this.RegisterCommandHandlers();
+
                 log.Info($"Activated mod `{ModMetadata.Name} (v{ModMetadata.Version})`.");
             }
             catch (Exception ex)
@@ -171,6 +181,18 @@ namespace ACE.Server.Mod
                 Status = ModStatus.Inactive;    //Todo: what status?  Something to prevent reload attempts?
             }
         }
+
+        public void SaveMetadata()
+        {
+            try
+            {
+                var json = JsonConvert.SerializeObject(ModMetadata, Formatting.Indented);
+                File.WriteAllText(MetadataPath, json);
+            }catch (Exception ex)
+            {
+                log.Error($"Error saving metadata to: {MetadataPath}");
+            }
+        }    
 
         #region Events
         //If Loader has hot reload enabled this triggers after the assembly is loaded again (after GC)
@@ -216,5 +238,53 @@ namespace ACE.Server.Mod
         //NameConflict,       //Mod loaded but a higher priority mod has the same name
         //MissingDependency,  //Keeping it simple for now
         //Conflict,           //Loaded and conflict detected
+    }
+
+    public static class ModContainerHelpers {
+        public static void RegisterCommandHandlers(this ModContainer container, bool overrides = true)
+        {
+            if (container?.ModAssembly is null)
+                return;
+
+            foreach (var type in container.ModAssembly.GetTypes())
+            {
+                foreach (var method in type.GetMethods())
+                {
+                    foreach (var attribute in method.GetCustomAttributes<CommandHandlerAttribute>())
+                    {
+                        var commandHandler = new CommandHandlerInfo()
+                        {
+                            Handler = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), method),
+                            Attribute = attribute
+                        };
+
+                        if (CommandManager.TryAddCommand(commandHandler, overrides))
+                            ModManager.Log($"{container.ModMetadata.Name} added command: {method.Name}");
+                        else
+                            ModManager.Log($"{container.ModMetadata.Name} failed to add command: {method.Name}");
+                    }
+                }
+            }
+        }
+
+        public static void UnregisterCommandHandlers(this ModContainer container)
+        {
+            if (container?.ModAssembly is null)
+                return;
+
+            foreach (var type in container.ModAssembly.GetTypes())
+            {
+                foreach (var method in type.GetMethods())
+                {
+                    foreach (var attribute in method.GetCustomAttributes<CommandHandlerAttribute>())
+                    {
+                        if (CommandManager.TryRemoveCommand(attribute.Command))
+                            ModManager.Log($"{container.ModMetadata.Name} removed command: {method.Name}");
+                        else
+                            ModManager.Log($"{container.ModMetadata.Name} failed to remove command: {method.Name}");
+                    }
+                }
+            }
+        }
     }
 }

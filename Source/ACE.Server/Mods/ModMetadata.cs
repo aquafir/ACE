@@ -1,8 +1,13 @@
+using Newtonsoft.Json;
+using System;
+
 namespace ACE.Server.Mod
 {
     public class ModMetadata
     {
+        [JsonIgnore]
         public const string FILENAME = "Meta.json";
+        [JsonIgnore]
         public const string TYPENAME = "Mod";
 
         public string Name { get; set; } = "SomeMod";
@@ -14,7 +19,12 @@ namespace ACE.Server.Mod
         /// <summary>
         /// Determines whether mod is patched on load.
         /// </summary>
-        public bool Enabled { get; set; }
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Loads/unloads methods with CommandHandler attributes
+        /// </summary>
+        public bool RegisterCommands { get; set; } = true;
 
         #region Requirements/Conflicts
         ////Todo

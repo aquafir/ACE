@@ -64,8 +64,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docker", "Docker", "{60DC64
 		..\Dockerfile.arm64 = ..\Dockerfile.arm64
 	EndProjectSection
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ACE.Mod", "ACE.Mod\ACE.Mod.csproj", "{2055ED6C-B4CB-4721-BC3D-BC1F7D1E0F45}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -131,14 +129,6 @@ Global
 		{3C925D75-B149-4898-8806-054D3E63A4BE}.Release|Any CPU.Build.0 = Release|Any CPU
 		{3C925D75-B149-4898-8806-054D3E63A4BE}.Release|x64.ActiveCfg = Release|Any CPU
 		{3C925D75-B149-4898-8806-054D3E63A4BE}.Release|x64.Build.0 = Release|Any CPU
-		{2055ED6C-B4CB-4721-BC3D-BC1F7D1E0F45}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{2055ED6C-B4CB-4721-BC3D-BC1F7D1E0F45}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{2055ED6C-B4CB-4721-BC3D-BC1F7D1E0F45}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{2055ED6C-B4CB-4721-BC3D-BC1F7D1E0F45}.Debug|x64.Build.0 = Debug|Any CPU
-		{2055ED6C-B4CB-4721-BC3D-BC1F7D1E0F45}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{2055ED6C-B4CB-4721-BC3D-BC1F7D1E0F45}.Release|Any CPU.Build.0 = Release|Any CPU
-		{2055ED6C-B4CB-4721-BC3D-BC1F7D1E0F45}.Release|x64.ActiveCfg = Release|Any CPU
-		{2055ED6C-B4CB-4721-BC3D-BC1F7D1E0F45}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

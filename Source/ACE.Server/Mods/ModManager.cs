@@ -1,20 +1,24 @@
 using ACE.Entity.Enum;
-using ACE.Mod;
 using ACE.Server.Command;
 using ACE.Server.Managers;
+using ACE.Server.Mod;
 using ACE.Server.Network;
 using ACE.Server.WorldObjects;
 using HarmonyLib;
 using log4net;
+using log4net.Core;
 using McMaster.NETCore.Plugins;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.Extensions.Logging;
 using Mono.Cecil.Cil;
+using MySqlX.XDevAPI;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 
 namespace ACE.Server.Mod
@@ -28,28 +32,21 @@ namespace ACE.Server.Mod
         /// <summary>
         /// Mods with at least metadata loaded
         /// </summary>
-        private static List<ModContainer> _mods = new();
-        public static List<ModContainer> Mods => _mods;
+        private static List<ModContainer> Mods { get; set; } = new();
 
-        public static void Initialize() {
+        #region Init / Shutdown
+        public static void Initialize()
+        {
             FindMods();
-            EnableAllMods(_mods);
-        }
-        internal static bool Test(int i = 1)
-        {
-            log.Info($"Test {i}");
-            return true;
+            EnableAllMods(Mods);
         }
 
-
-        public static void ListMods()
+        internal static void Shutdown()
         {
-            foreach (var mod in _mods)
-            {
-                var meta = mod.ModMetadata;
-                Console.WriteLine($"{meta.Name} is {(meta.Enabled ? "Enabled" : "Disabled")}\r\n\tSource: {mod.FolderPath}\r\n\tStatus: {mod.Status}");
-            }
+            //Todo: consider 
+            UnpatchAllMods();
         }
+        #endregion
 
         #region Load
         /// <summary>
@@ -57,8 +54,8 @@ namespace ACE.Server.Mod
         /// </summary>
         public static void FindMods()
         {
-            _mods = LoadModEntries(ModDirectory);
-            _mods = _mods.OrderByDescending(x => x.ModMetadata.Priority).ToList();
+            Mods = LoadModEntries(ModDirectory);
+            Mods = Mods.OrderByDescending(x => x.ModMetadata.Priority).ToList();
 
             //Todo: Filter out bad mods here or when loading entries?
             //CheckDuplicateNames(_mods);
@@ -197,7 +194,7 @@ namespace ACE.Server.Mod
 
         public static void EnableModByName(string modName)
         {
-            foreach (var mod in _mods.Where(x => x.ModMetadata.Name.Contains(modName)))
+            foreach (var mod in Mods.Where(x => x.ModMetadata.Name.Contains(modName)))
             {
                 EnableMod(mod);
             }
@@ -234,7 +231,7 @@ namespace ACE.Server.Mod
         #region Unpatch
         public static void UnpatchAllMods()
         {
-            foreach (var mod in _mods)
+            foreach (var mod in Mods)
             {
                 UnpatchMod(mod);
             }
@@ -242,7 +239,7 @@ namespace ACE.Server.Mod
 
         public static void UnpatchModByName(string modName)
         {
-            foreach (var mod in _mods.Where(x => x.ModMetadata.Name.Contains(modName)))
+            foreach (var mod in Mods.Where(x => x.ModMetadata.Name.Contains(modName)))
             {
                 UnpatchMod(mod);
             }
@@ -271,6 +268,26 @@ namespace ACE.Server.Mod
         #endregion
 
         #region Helpers
+        public static void ListMods(Player player = null)
+        {
+            var sb = new StringBuilder();
+            if (Mods.Count < 1)
+                sb.AppendLine("No mods to display.");
+            else
+            {
+                sb.AppendLine($"Displaying mods ({Mods.Count}):");
+                foreach (var mod in Mods)
+                {
+                    var meta = mod.ModMetadata;
+                    sb.AppendLine($"{meta.Name} is {(meta.Enabled ? "Enabled" : "Disabled")}");
+                    sb.AppendLine($"\tSource: {mod.FolderPath}");
+                    sb.AppendLine($"\tStatus: {mod.Status}");
+                }
+            }
+
+            log.Info(sb);
+            player?.SendMessage(sb.ToString());
+        }
 
         public static string GetFolder(IHarmonyMod mod)
         {
@@ -278,96 +295,56 @@ namespace ACE.Server.Mod
             return match is null ? "" : match.FolderPath;
         }
 
-        public static void Log(string message)
+
+        public enum LogLevel
         {
-            log.Info(message);
+            Debug,
+            Error,
+            Fatal,
+            Info,
+            Warn
+        }
+
+        public static void Log(string message, LogLevel level = LogLevel.Info)
+        {
+            switch (level)
+            {
+                case LogLevel.Debug:
+                    log.Debug(message);
+                    break;
+                case LogLevel.Error:
+                    log.Error(message);
+                    break;
+                case LogLevel.Fatal:
+                    log.Fatal(message);
+                    break;
+                case LogLevel.Info:
+                    log.Info(message);
+                    break;
+                case LogLevel.Warn:
+                    log.Warn(message);
+                    break;
+                default:
+                    log.Info(message);
+                    break;
+            };
         }
 
         public static void Message(string name, string message)
         {
             var player = PlayerManager.FindByName(name, out bool online);
-            if(online)
+            if (online)
             {
                 ((Player)player).SendMessage(message);
             }
         }
-        #endregion
 
-        #region Helpers
-        private static Dictionary<CommandHandlerInfo, Action<Session, string[]>> commands = new();
-        public static bool TryCreateCommand(MethodInfo method, string command)
-        {
-            var handler = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), method);
-            
-            var info = new CommandHandlerInfo()
-            {
-                Attribute = new CommandHandlerAttribute(command, AccessLevel.Player, CommandHandlerFlag.None),//, access, flags, description, usage),
-                Handler = handler
-            };
-
-            CommandManager.TryAddCommand(info);
-            return true;
-        }
-                                            
-        public static bool TryCreateCommand(Action<Session, string[]> handler,
-                                            string command,
-                                            //AccessLevel access,
-                                            //CommandHandlerFlag flags = CommandHandlerFlag.None,
-                                            //string description = "",
-                                            //string usage = "",
-                                            bool overrides = true)
-        {
-            //if(commands.ContainsKey(command) && !overrides)
-            //{
-            //        log.Warn($"Command already exists: {command} ");
-            //        return false;
-            //}
-            var commandHandler = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), handler.Method);
-            var info = new CommandHandlerInfo()
-            {
-                Attribute = new CommandHandlerAttribute(command, AccessLevel.Player, CommandHandlerFlag.None),//, access, flags, description, usage),
-                Handler = commandHandler
-            };
-            
-            if(CommandManager.TryAddCommand(info, overrides))
-            {
-                log.Info($"Created command: {command}");
-                return true;
-            }
-            else
-            {
-                log.Warn($"Command already exists: {command} ");
-                return false;
-            }
-        }
-        public static bool TryRemoveCommand(string command)
-        {
-            //Todo: decide about using something like handler.Method.GetParameters to allow overloading commands
-            return true;
-        }
-
-        public static CommandHandlerAttribute CreateHandlerAttribute(string command, AccessLevel accessLevel, CommandHandlerFlag flags = CommandHandlerFlag.None, string description = "", string usage = "")
-        {
-            return new CommandHandlerAttribute(command, accessLevel, flags, description, usage);
-        }
-
-        public static CommandHandlerInfo CreateHandlerInfo(CommandHandler handler)
-        {
-            return null;
-        }
-
-        public static ModContainer GetModContainerByName(string name) =>
-            Mods.Where(x => x.ModMetadata.Name == name).FirstOrDefault();
+        public static ModContainer GetModContainerByName(string name, bool allowPartial = true) => allowPartial ?
+            Mods.Where(x => x.ModMetadata.Name.Contains(name, StringComparison.OrdinalIgnoreCase)).FirstOrDefault() :
+        Mods.Where(x => x.ModMetadata.Name == name).FirstOrDefault();
 
         public static ModContainer GetModContainerByPath(string path) =>
             Mods.Where(x => x.FolderPath == path).FirstOrDefault();
-
-        //Shutdown
-        //ServerManager.ShutdownServer
-
-        public static void Log(string message)
-        {
-            log.Info(message);
-        }
+        #endregion
     }
 }
