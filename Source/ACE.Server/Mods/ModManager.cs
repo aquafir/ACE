@@ -1,27 +1,14 @@
-using ACE.Entity.Enum;
-using ACE.Server.Command;
 using ACE.Server.Managers;
-using ACE.Server.Mod;
-using ACE.Server.Network;
 using ACE.Server.WorldObjects;
-using HarmonyLib;
 using log4net;
-using log4net.Core;
-using McMaster.NETCore.Plugins;
-using Microsoft.EntityFrameworkCore.Metadata.Internal;
-using Microsoft.Extensions.Logging;
-using Mono.Cecil.Cil;
-using MySqlX.XDevAPI;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Text;
-using System.Threading;
 
-namespace ACE.Server.Mod
+namespace ACE.Server.Mods
 {
     public static class ModManager
     {
@@ -36,73 +23,56 @@ namespace ACE.Server.Mod
         public static void Initialize()
         {
             FindMods();
-            EnableAllMods(Mods);
         }
 
         internal static void Shutdown()
         {
             //Todo: consider 
-            UnpatchAllMods();
+            DisableAllMods();
         }
         #endregion
 
-        #region Load
+        #region Load Metadata
         /// <summary>
         /// Finds all valid mods in the mod directory and attempts to load them.
         /// </summary>
         public static void FindMods()
         {
-            var s = Common.ConfigManager.Config.Server;
-            var m = s.ModsDirectory;
-            Mods = LoadModEntries(Common.ConfigManager.Config.Server.ModsDirectory);
-            Mods = Mods.OrderByDescending(x => x.ModMetadata.Priority).ToList();
+            Mods = LoadMods(Common.ConfigManager.Config.Server.ModsDirectory);
+            Mods = Mods.OrderByDescending(x => x.Meta.Priority).ToList();
 
             //Todo: Filter out bad mods here or when loading entries?
             //CheckDuplicateNames(_mods);
+
+            EnableMods(Mods);
 
             ListMods();
         }
 
         /// <summary>
-        /// Loads all mods that have a valid Meta.json and correctly named DLL
+        /// Shuts down existing mods recreates ModContainers
         /// </summary>
         /// <param name="directory"></param>
-        /// <returns></returns>
-        private static List<ModContainer> LoadModEntries(string directory, bool unpatch = true)
+        private static List<ModContainer> LoadMods(string directory, bool unpatch = true)
         {
             //Todo: decide if this should always be done?
             if (unpatch)
             {
-                UnpatchAllMods();
+                DisableAllMods();
             }
 
             var entries = LoadAllMetadata(directory);
             foreach (var entry in entries)
             {
-                LoadMod(entry);
+                entry.Initialize();
             }
             return entries;
-        }
-
-        /// <summary>
-        /// Sets up PluginLoader and IHarmonyMod type for mod entry if possible
-        /// </summary>
-        /// <param name="entry"></param>
-        private static void LoadMod(ModContainer entry)
-        {
-            var folderName = new DirectoryInfo(entry.FolderPath).Name;
-            var dllPath = Path.Combine(entry.FolderPath, folderName + ".dll");
-
-            //entry.
-            entry.Initialize();
-            return;
         }
 
         /// <summary>
         /// Loads all valid metadata from folders in a given directory as ModContainer
         /// </summary>
         /// <param name="directory"></param>
-        /// <returns></returns>
         private static List<ModContainer> LoadAllMetadata(string directory)
         {
             var loadedMods = new List<ModContainer>();
@@ -121,12 +91,12 @@ namespace ACE.Server.Mod
             {
                 var metadataPath = Path.Combine(modDir, ModMetadata.FILENAME);
 
-                if (!TryLoadModContainer(metadataPath, out var entry))
+                if (!TryLoadModContainer(metadataPath, out var container))
                 {
                     continue;
                 }
 
-                loadedMods.Add(entry);
+                loadedMods.Add(container);
             }
 
             return loadedMods;
@@ -136,11 +106,11 @@ namespace ACE.Server.Mod
         /// Loads metadata from specified ..\Meta.json file.  Fails if missing or invalid.
         /// </summary>
         /// <param name="metadataPath"></param>
-        /// <param name="entry"></param>
+        /// <param name="container"></param>
         /// <returns></returns>
-        private static bool TryLoadModContainer(string metadataPath, out ModContainer entry)
+        private static bool TryLoadModContainer(string metadataPath, out ModContainer container)
         {
-            entry = null;
+            container = null;
 
             if (!File.Exists(metadataPath))
             {
@@ -153,9 +123,9 @@ namespace ACE.Server.Mod
             {
                 var metadata = JsonConvert.DeserializeObject<ModMetadata>(File.ReadAllText(metadataPath));
 
-                entry = new ModContainer()
+                container = new ModContainer()
                 {
-                    ModMetadata = metadata,
+                    Meta = metadata,
                     FolderPath = Path.GetDirectoryName(metadataPath),    //Todo: would dll/metadata path make more sense?
                 };
 
@@ -182,87 +152,42 @@ namespace ACE.Server.Mod
         //}
         #endregion
 
-        #region Patch
-        private static void EnableAllMods(List<ModContainer> mods)
+        #region Enable / Disable
+        private static void EnableMods(List<ModContainer> containers)
         {
-            foreach (var mod in mods.Where(m => m.Status == ModStatus.Inactive && m.ModMetadata.Enabled))
+            foreach (var container in containers.Where(m => m.Meta.Enabled && (m.Status == ModStatus.Inactive || m.Status == ModStatus.Unloaded)))
             {
-                EnableMod(mod);
+                container.Enable();
             }
         }
 
         public static void EnableModByName(string modName)
         {
-            foreach (var mod in Mods.Where(x => x.ModMetadata.Name.Contains(modName)))
+            var mod = Mods.Where(x => x.Meta.Name.Contains(modName, StringComparison.OrdinalIgnoreCase)).FirstOrDefault();
+
+            mod.Enable();
+        }
+
+        public static void DisableAllMods()
+        {
+            foreach (var container in Mods)
             {
-                EnableMod(mod);
+                container.Disable();
             }
         }
 
-        public static void EnableMod(ModContainer mod)
+        public static void DisableModByPath(string modPath)
         {
-            try
-            {
-                if (mod.Status != ModStatus.Inactive)
-                {
-                    log.Info($"Skipping already active mod: {mod.ModMetadata.Name}");
-                    return;
-                }
+            var container = Mods.Where(x => x.FolderPath == modPath).FirstOrDefault();
 
-                if (mod.Instance is null)
-                {
-                    mod.Instance = Activator.CreateInstance(mod.ModType) as IHarmonyMod;
-                    log.Info($"Created instance of {mod.ModType.Name}");
-                }
-
-                mod.Instance?.Initialize();
-                mod.Status = ModStatus.Active;
-
-                log.Info($"Activated mod `{mod.ModMetadata.Name} (v{mod.ModMetadata.Version})`.");
-            }
-            catch (Exception ex)
-            {
-                log.Error($"Error patching {mod.ModMetadata.Name}: {ex}");
-            }
-        }
-        #endregion
-
-        #region Unpatch
-        public static void UnpatchAllMods()
-        {
-            foreach (var mod in Mods)
-            {
-                UnpatchMod(mod);
-            }
+            container?.Disable();
         }
 
-        public static void UnpatchModByName(string modName)
+        public static void DisableModByName(string modName)
         {
-            foreach (var mod in Mods.Where(x => x.ModMetadata.Name.Contains(modName)))
-            {
-                UnpatchMod(mod);
-            }
-        }
+            var container = Mods.Where(x => x.Meta.Name.Contains(modName, StringComparison.OrdinalIgnoreCase)).FirstOrDefault();
 
-        private static async void UnpatchMod(ModContainer mod)
-        {
-            try
-            {
-                if (mod.Status != ModStatus.Active)
-                {
-                    //log.Info($"Skipping {mod.ModMetadata.Name}");
-                    return;
-                }
-
-                //mod.Instance?.Shutdown();
-                mod.Instance?.Dispose();
-                mod.Status = ModStatus.Inactive;
-                log.Info($"Unpatching {mod.ModMetadata.Name}");
-            }
-            catch (Exception ex)
-            {
-                log.Error($"Error unpatching {mod.ModMetadata.Name}: {ex}");
-            }
+            container?.Disable();
         }
         #endregion
 
@@ -277,7 +202,7 @@ namespace ACE.Server.Mod
                 sb.AppendLine($"Displaying mods ({Mods.Count}):");
                 foreach (var mod in Mods)
                 {
-                    var meta = mod.ModMetadata;
+                    var meta = mod.Meta;
                     sb.AppendLine($"{meta.Name} is {(meta.Enabled ? "Enabled" : "Disabled")}");
                     sb.AppendLine($"\tSource: {mod.FolderPath}");
                     sb.AppendLine($"\tStatus: {mod.Status}");
@@ -287,13 +212,6 @@ namespace ACE.Server.Mod
             log.Info(sb);
             player?.SendMessage(sb.ToString());
         }
-
-        public static string GetFolder(IHarmonyMod mod)
-        {
-            var match = Mods.Where(x => x.Instance == mod).FirstOrDefault();
-            return match is null ? "" : match.FolderPath;
-        }
-
 
         public enum LogLevel
         {
@@ -338,9 +256,15 @@ namespace ACE.Server.Mod
             }
         }
 
+        public static string GetFolder(IHarmonyMod mod)
+        {
+            var match = Mods.Where(x => x.Instance == mod).FirstOrDefault();
+            return match is null ? "" : match.FolderPath;
+        }
+
         public static ModContainer GetModContainerByName(string name, bool allowPartial = true) => allowPartial ?
-            Mods.Where(x => x.ModMetadata.Name.Contains(name, StringComparison.OrdinalIgnoreCase)).FirstOrDefault() :
-        Mods.Where(x => x.ModMetadata.Name == name).FirstOrDefault();
+            Mods.Where(x => x.Meta.Name.Contains(name, StringComparison.OrdinalIgnoreCase)).FirstOrDefault() :
+        Mods.Where(x => x.Meta.Name == name).FirstOrDefault();
 
         public static ModContainer GetModContainerByPath(string path) =>
             Mods.Where(x => x.FolderPath == path).FirstOrDefault();

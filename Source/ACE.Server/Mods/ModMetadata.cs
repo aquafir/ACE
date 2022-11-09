@@ -1,7 +1,7 @@
 using Newtonsoft.Json;
 using System;
 
-namespace ACE.Server.Mod
+namespace ACE.Server.Mods
 {
     public class ModMetadata
     {
@@ -20,6 +20,11 @@ namespace ACE.Server.Mod
         /// Determines whether mod is patched on load.
         /// </summary>
         public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Reload the mod when the assembly changes
+        /// </summary>
+        public bool HotReload { get; set; } = true;
 
         /// <summary>
         /// Loads/unloads methods with CommandHandler attributes

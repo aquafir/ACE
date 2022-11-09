@@ -1,4 +1,4 @@
-#define FAST
+#define FASTT
 
 using System;
 using System.Globalization;
@@ -16,7 +16,7 @@ using ACE.DatLoader;
 using ACE.Server.Command;
 using ACE.Server.Managers;
 using ACE.Server.Network.Managers;
-using ACE.Server.Mod;
+using ACE.Server.Mods;
 
 namespace ACE.Server
 {

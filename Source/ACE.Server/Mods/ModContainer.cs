@@ -1,25 +1,19 @@
-using ACE.Adapter.GDLE.Models;
-using ACE.Server.Command;
-using ACE.Server.Mod;
 using log4net;
 using McMaster.NETCore.Plugins;
 using System;
 
 using System.IO;
-using System.Linq;
 using System.Reflection;
-using System.Text.Json.Serialization;
-using System.Text.Json;
 using Newtonsoft.Json;
 
-namespace ACE.Server.Mod
+namespace ACE.Server.Mods
 {
     public class ModContainer
     {
         private static readonly ILog log = LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
         private readonly TimeSpan RELOAD_TIMEOUT = TimeSpan.FromSeconds(3);
 
-        public ModMetadata ModMetadata { get; set; }
+        public ModMetadata Meta { get; set; }
         public ModStatus Status = ModStatus.Unloaded;
 
         public Assembly ModAssembly { get; set; }   //Todo: decide what actually makes sense to keep
@@ -31,7 +25,7 @@ namespace ACE.Server.Mod
         // SomeMod
         public string FolderName //{ get; private set; }      
                 => new DirectoryInfo(FolderPath).Name;
-        // C:\ACE\Mods\SomeMod\Somedll
+        // C:\ACE\Mods\SomeMod\SomeMod.dll
         public string DllPath =>
                 Path.Combine(FolderPath, FolderName + ".dll");
         // C:\ACE\Mods\SomeMod\Meta.json
@@ -42,7 +36,7 @@ namespace ACE.Server.Mod
             ModAssembly.ManifestModule.ScopeName.Replace(".dll", "." + ModMetadata.TYPENAME);
 
         public PluginLoader Loader { get; private set; }
-        private FileSystemWatcher _dllWatcher;
+        //private FileSystemWatcher _dllWatcher;
         private DateTime _lastChange = DateTime.Now;
 
         /// <summary>
@@ -50,18 +44,22 @@ namespace ACE.Server.Mod
         /// </summary>
         public void Initialize()
         {
-            //Todo: checks n all that jazz
+            if (Meta is null)
+            {
+                log.Warn($"Unable to initialize.  Check Meta.json...");
+                return;
+            }
 
             //Watching for changes in the dll might be needed if it has unreleased resources?
             //https://github.com/natemcmaster/DotNetCorePlugins/issues/86
-            _dllWatcher = new FileSystemWatcher()
-            {
-                Path = FolderPath,
-                //Filter = DllPath,
-                Filter = $"{FolderName}.dll",
-                EnableRaisingEvents = true,
-                NotifyFilter = NotifyFilters.LastWrite  //?
-            };
+            //_dllWatcher = new FileSystemWatcher()
+            //{
+            //    Path = FolderPath,
+            //    //Filter = DllPath,
+            //    Filter = $"{FolderName}.dll",
+            //    EnableRaisingEvents = true,
+            //    NotifyFilter = NotifyFilters.LastWrite  //?
+            //};
             //_dllWatcher.Changed += ModDll_Changed;
             //_dllWatcher.Created += ModDll_Created;
             //_dllWatcher.Renamed += ModDll_Renamed;
@@ -71,128 +69,156 @@ namespace ACE.Server.Mod
             Loader = PluginLoader.CreateFromAssemblyFile(
                 assemblyFile: DllPath,
                 isUnloadable: true,
-                sharedTypes: new Type[] { },
+                sharedTypes: new Type[] {  },
                 configure: config =>
                 {
-                    config.EnableHotReload = true;
+                    config.EnableHotReload = Meta.HotReload;
                     config.IsLazyLoaded = false;     //?
-                }
+                }                
             );
             Loader.Reloaded += Reload;
 
             log.Info($"Set up {FolderName}");
-
-            Restart();
         }
 
-        public void Restart()
+        /// <summary>
+        /// Loads assembly and activates an instance of the mod
+        /// </summary>
+        public void Enable()
         {
-            Shutdown();
-            //CreateModInstance();  //moved to enable
-            Enable();
+            if (Status == ModStatus.Active)
+            {
+                log.Info($"Mod is already enabled: {Meta.Name}");
+                return;
+            }
+            if (Status == ModStatus.LoadFailure)
+            {
+                log.Info($"Unable to activate mod that failed to load: {Meta.Name}");
+                return;
+            }
+
+            //Load assembly and create an instance if needed  (always?)
+            if (!TryLoadModAssembly())
+            {
+                return;
+            }
+
+            if (!TryCreateModInstance())
+            {
+                return;
+            }
+
+            //Only mods with loaded assemblies that aren't active can be enabled
+            if (Status != ModStatus.Inactive)
+            {
+                log.Info($"{Meta.Name} is not inactive.");
+                return;
+            }
+
+            //Start mod and set status
+            try
+            {
+                Instance?.Initialize();
+                Status = ModStatus.Active;
+
+                if (Meta.RegisterCommands)
+                    this.RegisterCommandHandlers();
+
+                log.Info($"Enabled mod `{Meta.Name} (v{Meta.Version})`.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"Error enabling {Meta.Name}: {ex}");
+                Status = ModStatus.Inactive;    //Todo: what status?  Something to prevent reload attempts?
+            }
         }
 
-        public void Shutdown()
+        //Todo: decide about removing the assembly?
+        /// <summary>
+        /// Disposes a mod and removes its chat commands
+        /// </summary>
+        public void Disable()
         {
-            if (Instance is null)
+            if (Status != ModStatus.Active)
                 return;
 
             log.Info($"{FolderName} shutting down @ {DateTime.Now}");
 
-            if (ModMetadata.RegisterCommands)
-                this.UnregisterCommandHandlers();
+            this.UnregisterCommandHandlers();
 
             Instance?.Dispose();
             Instance = null;
-            //Status = ModStatus.Unloaded;
             Status = ModStatus.Inactive;
         }
 
-        private void CreateModInstance()
+        public void Restart()
+        {
+            Disable();
+            Enable();
+        }
+
+        private bool TryLoadModAssembly()
         {
             if (!File.Exists(DllPath))
             {
                 log.Warn($"Missing mod: {DllPath}");
-                return;
-            }
-
-            //Todo: decide if assemblies should be loaded if mods are inactive.  Currently using Unloaded
-            if (!ModMetadata.Enabled)
-            {
-                log.Info($"Instance not created for disabled mod: {FolderName}");
-                return;
+                return false;
             }
 
             try
             {
+                //Todo: check if an assembly is loaded?
+                //ModAssembly = Loader.LoadAssemblyFromPath(DllPath);
                 ModAssembly = Loader.LoadDefaultAssembly();
 
                 //Safer to use the dll to get the type than using convention
+                //ModType = ModAssembly.GetTypes().Where(x => x.IsAssignableFrom(typeof(IHarmonyMod))).FirstOrDefault();
                 ModType = ModAssembly.GetType(TypeName);
 
                 if (ModType is null)
                 {
                     Status = ModStatus.LoadFailure;
                     log.Warn($"Missing IHarmonyMod Type {TypeName} from {ModAssembly}");
-                }
-                else
-                {
-                    Status = ModStatus.Inactive;
+                    return false;
                 }
             }
             catch (Exception e)
             {
                 Status = ModStatus.LoadFailure;
                 log.Error($"Failed to load mod file `{DllPath}`: {e}");
+                return false;
             }
+
+            Status = ModStatus.Inactive;
+            return true;
         }
 
-        public void Enable()
+        private bool TryCreateModInstance()
         {
             try
             {
-                CreateModInstance();    //todo rethink all this
-
-                //Only mods with loaded assemblies that aren't active can be enabled
-                if (Status != ModStatus.Inactive)
-                {
-                    log.Info($"{ModMetadata.Name} is not inactive.");
-                    return;
-                }
-
-                //Create an instance if needed
-                if (Instance is null)
-                {
-                    Instance = Activator.CreateInstance(ModType) as IHarmonyMod;
-                    log.Info($"Created instance of {ModType.Name}");
-                }
-
-                Instance?.Initialize();
-                Status = ModStatus.Active;
-
-                if (ModMetadata.RegisterCommands)
-                    this.RegisterCommandHandlers();
-
-                log.Info($"Activated mod `{ModMetadata.Name} (v{ModMetadata.Version})`.");
+                //var m = Activator.CreateInstance(ModType);
+                Instance = Activator.CreateInstance(ModType) as IHarmonyMod;
+                log.Info($"Created instance of {Meta.Name}");
             }
             catch (Exception ex)
             {
-                log.Error($"Error patching {ModMetadata.Name}: {ex}");
-                Status = ModStatus.Inactive;    //Todo: what status?  Something to prevent reload attempts?
+                Status = ModStatus.LoadFailure;
+                log.Error($"Failed to create Mod instance: {Meta.Name}");
+                return false;
             }
+
+            return true;
         }
 
         public void SaveMetadata()
         {
-            try
-            {
-                var json = JsonConvert.SerializeObject(ModMetadata, Formatting.Indented);
-                File.WriteAllText(MetadataPath, json);
-            }catch (Exception ex)
-            {
-                log.Error($"Error saving metadata to: {MetadataPath}");
-            }
-        }    
+            var json = JsonConvert.SerializeObject(Meta, Formatting.Indented);
+            var info = new FileInfo(MetadataPath);
+
+            if (!info.RetryWrite(json))
+                log.Error($"Saving metadata failed: {MetadataPath}");
+        }
 
         #region Events
         //If Loader has hot reload enabled this triggers after the assembly is loaded again (after GC)
@@ -224,67 +250,33 @@ namespace ACE.Server.Mod
             log.Info($"{FolderName} changed @ {DateTime.Now} after {lapsed.TotalMilliseconds}ms");
             _lastChange = DateTime.Now;
 
-            Shutdown();
+            Disable();
         }
         #endregion
     }
 
     public enum ModStatus
     {
-        Unloaded,	        //Assembly not loaded
-        Inactive,           //Loaded and activatable
-        Active,		        //Loaded and active
-        LoadFailure,        //Failed to load assembly
+        /// <summary>
+        /// Assembly not loaded
+        /// </summary>
+        Unloaded,
+        /// <summary>
+        /// Assembly loaded but an instance is not active
+        /// </summary>
+        Inactive,
+        /// <summary>
+        /// Assembly is loaded and an instance is active
+        /// </summary>
+        Active,
+        /// <summary>
+        /// Assembly failed to load
+        /// </summary>
+        LoadFailure,
+
+        //Todo: Decide on how to represent future conflicts/errors
         //NameConflict,       //Mod loaded but a higher priority mod has the same name
         //MissingDependency,  //Keeping it simple for now
         //Conflict,           //Loaded and conflict detected
-    }
-
-    public static class ModContainerHelpers {
-        public static void RegisterCommandHandlers(this ModContainer container, bool overrides = true)
-        {
-            if (container?.ModAssembly is null)
-                return;
-
-            foreach (var type in container.ModAssembly.GetTypes())
-            {
-                foreach (var method in type.GetMethods())
-                {
-                    foreach (var attribute in method.GetCustomAttributes<CommandHandlerAttribute>())
-                    {
-                        var commandHandler = new CommandHandlerInfo()
-                        {
-                            Handler = (CommandHandler)Delegate.CreateDelegate(typeof(CommandHandler), method),
-                            Attribute = attribute
-                        };
-
-                        if (CommandManager.TryAddCommand(commandHandler, overrides))
-                            ModManager.Log($"{container.ModMetadata.Name} added command: {method.Name}");
-                        else
-                            ModManager.Log($"{container.ModMetadata.Name} failed to add command: {method.Name}");
-                    }
-                }
-            }
-        }
-
-        public static void UnregisterCommandHandlers(this ModContainer container)
-        {
-            if (container?.ModAssembly is null)
-                return;
-
-            foreach (var type in container.ModAssembly.GetTypes())
-            {
-                foreach (var method in type.GetMethods())
-                {
-                    foreach (var attribute in method.GetCustomAttributes<CommandHandlerAttribute>())
-                    {
-                        if (CommandManager.TryRemoveCommand(attribute.Command))
-                            ModManager.Log($"{container.ModMetadata.Name} removed command: {method.Name}");
-                        else
-                            ModManager.Log($"{container.ModMetadata.Name} failed to remove command: {method.Name}");
-                    }
-                }
-            }
-        }
     }
 }

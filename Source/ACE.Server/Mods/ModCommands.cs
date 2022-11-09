@@ -1,22 +1,13 @@
 using System;
-using System.Net;
 
 //using log4net;
 
-using ACE.Database;
-using ACE.Database.Models.Auth;
 using ACE.Entity.Enum;
 using ACE.Server.Network;
-using ACE.Server.Mod;
-using ACE.Adapter.GDLE.Models;
-using System.Linq;
-using ACE.Server.WorldObjects;
+using ACE.Server.Mods;
 using HarmonyLib;
 using System.Text;
-using System.ComponentModel;
 using System.Diagnostics;
-using Discord.Rest;
-using System.IO;
 
 namespace ACE.Server.Command.Handlers
 {
@@ -39,7 +30,11 @@ namespace ACE.Server.Command.Handlers
             "Lazy mod control")]
         public static void HandleListMods(Session session, params string[] parameters)
         {
-            if (parameters.Length < 1 || !Enum.TryParse<ModCommand>(parameters[0], true, out ModCommand verb)) return;
+            if (parameters.Length < 1 || !Enum.TryParse<ModCommand>(parameters[0], true, out ModCommand verb))
+            {
+                Log(USAGE, session);
+                return;
+            }
 
             ModContainer match = null;
             if (parameters.Length > 1)
@@ -60,7 +55,7 @@ namespace ACE.Server.Command.Handlers
                     DisableMod(session, match);
                     return;
                 case ModCommand.Restart:
-                    Log($"Restarting {match.ModMetadata.Name}", session);
+                    Log($"Restarting {match.Meta.Name}", session);
                     match.Restart();
                     return;
                 case ModCommand.Toggle:
@@ -120,22 +115,30 @@ namespace ACE.Server.Command.Handlers
                     }
                     return;
             }
+
+            Log(USAGE, session);
         }
 
+        /// <summary>
+        /// Disable Mod and save choice in Metadata
+        /// </summary>
         private static void DisableMod(Session session, ModContainer match)
         {
-            Log($"Disabling {match.ModMetadata.Name}", session);
-            match.Shutdown();
-            match.ModMetadata.Enabled = false;
+            Log($"Disabling {match.Meta.Name}", session);
+            match.Meta.Enabled = false;
             match.SaveMetadata();
+            match.Disable();
         }
 
+        /// <summary>
+        /// Enable Mod and save choice in Metadata
+        /// </summary>
         private static void EnableMod(Session session, ModContainer match)
         {
-            Log($"Enabling {match.ModMetadata.Name}", session);
-            match.Enable();
-            match.ModMetadata.Enabled = true;
+            Log($"Enabling {match.Meta.Name}", session);
+            match.Meta.Enabled = true;
             match.SaveMetadata();
+            match.Enable();
         }
 
         private static void Log(string message, Session session)
