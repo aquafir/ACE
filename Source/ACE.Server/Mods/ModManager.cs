@@ -38,7 +38,27 @@ namespace ACE.Server.Mods
         /// </summary>
         public static void FindMods()
         {
-            Mods = LoadMods(Common.ConfigManager.Config.Server.ModsDirectory);
+            var modPath = Common.ConfigManager.Config.Server.ModsDirectory ??
+                Path.Combine(Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location), "Mods");
+
+            if (Common.ConfigManager.Config.Server.ModsDirectory is null)
+                log.Warn($"You are missing the ModsDirectory setting in your Config.js.  Defaulting to:\r\n{modPath}");
+
+            if (!Directory.Exists(modPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(modPath);
+                    log.Info($"Created mod folder at:\r\n{modPath}");
+                }
+                catch (Exception ex)
+                {
+                    log.Error($"Failed to create mod folder:\r\n{modPath}");
+                    return;
+                }
+            }
+
+            Mods = LoadMods(modPath);
             Mods = Mods.OrderByDescending(x => x.Meta.Priority).ToList();
 
             //Todo: Filter out bad mods here or when loading entries?
