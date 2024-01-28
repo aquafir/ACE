@@ -1521,6 +1521,104 @@ namespace ACE.Server.WorldObjects
                 SendUseDoneEvent();
             }
         }
+    }
+}
+
+namespace ACE.Server.WorldObjects
+{
+    partial class WorldObject
+    {
+        /// <summary>
+        /// Launches a targeted War Magic spell projectile
+        /// </summary>
+        protected void WarMagic(WorldObject target, Spell spell, WorldObject weapon, bool isWeaponSpell = false, bool fromProc = false)
+        {
+            CreateSpellProjectiles(spell, target, weapon, isWeaponSpell, fromProc);
+        }
+    }
+}
+
+namespace ACE.Server.WorldObjects
+{
+    partial class Creature
+    {
+        public static readonly float MissileCleaveAngle = 180.0f;
+        public static readonly float MagicCleaveCylRange = 4.0f;
+        public static readonly float MissileCleaveCylRange = 4.0f;
+        public static readonly float MissileAoECylRange = 30.0f;
+        public static readonly float MissileAoEAngle = 45.0f;
+        public static readonly float DoTSpotAngle = 359;
+        public static readonly float DoTSpotCylRange = 4;
+        public static readonly float GunBladeProjectileSpeed = 300.0f;
+
+        public List<Creature> GetDoTTarget(Creature target)
+        {
+            var player = this as Player;
+
+            // sort visible objects by ascending distance
+            var visible = PhysicsObj.ObjMaint.GetVisibleObjectsValuesWhere(o => o.WeenieObj.WorldObject != null);
+            visible.Sort(DistanceComparator);
+
+            var cleaveTargets = new List<Creature>();
+
+            foreach (var obj in visible)
+            {
+                // only cleave creatures
+                var creature = obj.WeenieObj.WorldObject as Creature;
+                if (creature == null || creature.Teleporting || creature.IsDead) continue;
+
+                if (player != null && player.CheckPKStatusVsTarget(creature, null) != null)
+                    continue;
+
+                if (!creature.Attackable && creature.TargetingTactic == TargetingTactic.None || creature.Teleporting)
+                    continue;
+
+                if (creature is CombatPet && (player != null || this is CombatPet))
+                    continue;
+
+                // no objects in cleave range
+                var cylDist = GetCylinderDistance(creature);
+                if (cylDist > DoTSpotCylRange)
+                    return cleaveTargets;
+
+                // only cleave in front of attacker
+                var angle = GetAngle(creature);
+                if (Math.Abs(angle) > DoTSpotAngle)
+                    continue;
+
+                // found cleavable object
+                cleaveTargets.Add(creature);
+                if (cleaveTargets.Count == 8)
+                    break;
+            }
+            return cleaveTargets;
+        }
+
+        public float GetGunBladeProjectileSpeed()
+        {
+            var gunBlade = GetEquippedMeleeWeapon();
+
+            var maxVelocity = gunBlade?.MaximumVelocity ?? GunBladeProjectileSpeed;
+
+            if (maxVelocity == 0.0f)
+            {
+                // log.Warn($"{Name}.GetMissileSpeed() - {gunBlade.Name} ({gunBlade.Guid}) has speed 0");
+
+                maxVelocity = GunBladeProjectileSpeed;
+            }
+
+            if (this is Player player && player.GetCharacterOption(CharacterOption.UseFastMissiles))
+            {
+                maxVelocity *= PropertyManager.GetDouble("fast_missile_modifier").Item;
+            }
+
+            // hard cap in physics engine
+            maxVelocity = Math.Min(maxVelocity, PhysicsGlobals.MaxVelocity);
+
+            //Console.WriteLine($"MaxVelocity: {maxVelocity}");
+
+            return (float)maxVelocity;
+        }
 
         public virtual bool ValFindNextTarget()
         {
@@ -1683,105 +1781,6 @@ namespace ACE.Server.WorldObjects
                 ServerPerformanceMonitor.AddToCumulativeEvent(ServerPerformanceMonitor.CumulativeEventHistoryType.Monster_Awareness_FindNextTarget, stopwatch.Elapsed.TotalSeconds);
             }
         }
-
-    }
-}
-
-namespace ACE.Server.WorldObjects
-{
-    partial class WorldObject
-    {
-        /// <summary>
-        /// Launches a targeted War Magic spell projectile
-        /// </summary>
-        protected void WarMagic(WorldObject target, Spell spell, WorldObject weapon, bool isWeaponSpell = false, bool fromProc = false)
-        {
-            CreateSpellProjectiles(spell, target, weapon, isWeaponSpell, fromProc);
-        }
-    }
-}
-
-namespace ACE.Server.WorldObjects
-{
-    partial class Creature
-    {
-        public static readonly float MissileCleaveAngle = 180.0f;
-        public static readonly float MagicCleaveCylRange = 4.0f;
-        public static readonly float MissileCleaveCylRange = 4.0f;
-        public static readonly float MissileAoECylRange = 30.0f;
-        public static readonly float MissileAoEAngle = 45.0f;
-        public static readonly float DoTSpotAngle = 359;
-        public static readonly float DoTSpotCylRange = 4;
-        public static readonly float GunBladeProjectileSpeed = 300.0f;
-
-        public List<Creature> GetDoTTarget(Creature target)
-        {
-            var player = this as Player;
-
-            // sort visible objects by ascending distance
-            var visible = PhysicsObj.ObjMaint.GetVisibleObjectsValuesWhere(o => o.WeenieObj.WorldObject != null);
-            visible.Sort(DistanceComparator);
-
-            var cleaveTargets = new List<Creature>();
-
-            foreach (var obj in visible)
-            {
-                // only cleave creatures
-                var creature = obj.WeenieObj.WorldObject as Creature;
-                if (creature == null || creature.Teleporting || creature.IsDead) continue;
-
-                if (player != null && player.CheckPKStatusVsTarget(creature, null) != null)
-                    continue;
-
-                if (!creature.Attackable && creature.TargetingTactic == TargetingTactic.None || creature.Teleporting)
-                    continue;
-
-                if (creature is CombatPet && (player != null || this is CombatPet))
-                    continue;
-
-                // no objects in cleave range
-                var cylDist = GetCylinderDistance(creature);
-                if (cylDist > DoTSpotCylRange)
-                    return cleaveTargets;
-
-                // only cleave in front of attacker
-                var angle = GetAngle(creature);
-                if (Math.Abs(angle) > DoTSpotAngle)
-                    continue;
-
-                // found cleavable object
-                cleaveTargets.Add(creature);
-                if (cleaveTargets.Count == 8)
-                    break;
-            }
-            return cleaveTargets;
-        }
-
-        public float GetGunBladeProjectileSpeed()
-        {
-            var gunBlade = GetEquippedMeleeWeapon();
-
-            var maxVelocity = gunBlade?.MaximumVelocity ?? GunBladeProjectileSpeed;
-
-            if (maxVelocity == 0.0f)
-            {
-                // log.Warn($"{Name}.GetMissileSpeed() - {gunBlade.Name} ({gunBlade.Guid}) has speed 0");
-
-                maxVelocity = GunBladeProjectileSpeed;
-            }
-
-            if (this is Player player && player.GetCharacterOption(CharacterOption.UseFastMissiles))
-            {
-                maxVelocity *= PropertyManager.GetDouble("fast_missile_modifier").Item;
-            }
-
-            // hard cap in physics engine
-            maxVelocity = Math.Min(maxVelocity, PhysicsGlobals.MaxVelocity);
-
-            //Console.WriteLine($"MaxVelocity: {maxVelocity}");
-
-            return (float)maxVelocity;
-        }
     }
 }
 
@@ -1792,51 +1791,50 @@ namespace ACE.Server.Entity
         public readonly int DoTOwnerGuid;
         public float TotalThreat;
 
+        public DamageHistoryInfo(WorldObject attacker, bool valVersion, float totalDamage = 0.0f)
+        {
+            Attacker = new WeakReference<WorldObject>(attacker);
 
-        //public DamageHistoryInfo(WorldObject attacker, float totalDamage = 0.0f)
-        //{
-        //    Attacker = new WeakReference<WorldObject>(attacker);
+            Guid = attacker.Guid;
+            Name = attacker.Name;
+            DoTOwnerGuid = attacker.DoTOwnerGuid;
 
-        //    Guid = attacker.Guid;
-        //    Name = attacker.Name;
-        //    DoTOwnerGuid = attacker.DoTOwnerGuid;
+            TotalDamage = totalDamage;
+            TotalThreat = totalDamage;
 
-        //    TotalDamage = totalDamage;
-        //    TotalThreat = totalDamage;
+            var tankTotalThreatMod = 5.0f;
 
-        //    var tankTotalThreatMod = 5.0f;
+            if (attacker is Player player)
+            {
+                if (player.IsTank)
+                {
+                    if (player.TauntTimerActive)
+                        tankTotalThreatMod = 10.0f;
 
-        //    if (attacker is Player player)
-        //    {
-        //        if (player.IsTank)
-        //        {
-        //            if (player.TauntTimerActive)
-        //                tankTotalThreatMod = 10.0f;
+                    TotalThreat *= tankTotalThreatMod;
+                }
+                else
+                    TotalThreat *= totalDamage * 0.5f;
+            }
 
-        //            TotalThreat *= tankTotalThreatMod;
-        //        }
-        //        else
-        //            TotalThreat *= totalDamage * 0.5f;
-        //    }
+            if (attacker is CombatPet combatPet && combatPet.P_PetOwner != null)
+                PetOwner = new WeakReference<Player>(combatPet.P_PetOwner);
 
-        //    if (attacker is CombatPet combatPet && combatPet.P_PetOwner != null)
-        //        PetOwner = new WeakReference<Player>(combatPet.P_PetOwner);
-
-        //    if (attacker.WeenieClassId == 300501)
-        //    {
-        //        foreach (var p in PlayerManager.GetAllOnline())
-        //        {
-        //            if (p.Guid.Full == attacker.DoTOwnerGuid)
-        //            {
-        //                if (DoTOwnerGuid != 0)
-        //                {
-        //                    Guid = p.Guid;
-        //                    Name = p.Name;
-        //                }
-        //            }
-        //        }
-        //    }
-        //}
+            if (attacker.WeenieClassId == 300501)
+            {
+                foreach (var p in PlayerManager.GetAllOnline())
+                {
+                    if (p.Guid.Full == attacker.DoTOwnerGuid)
+                    {
+                        if (DoTOwnerGuid != 0)
+                        {
+                            Guid = p.Guid;
+                            Name = p.Name;
+                        }
+                    }
+                }
+            }
+        }
 
     }
 }
