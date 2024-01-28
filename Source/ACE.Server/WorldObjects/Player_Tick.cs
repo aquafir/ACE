@@ -102,6 +102,8 @@ namespace ACE.Server.WorldObjects
                 else if (houseRentWarnTimestamp == 0)
                     houseRentWarnTimestamp = Time.GetFutureUnixTime(houseRentWarnInterval);
             }
+
+            ValHeelAbilityManager(this);
         }
 
         private static readonly TimeSpan MaximumTeleportTime = TimeSpan.FromMinutes(5);
