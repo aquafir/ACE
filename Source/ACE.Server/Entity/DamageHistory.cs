@@ -11,7 +11,7 @@ namespace ACE.Server.Entity
     /// <summary>
     /// Tracks the recent damage sources for Players / Creatures
     /// </summary>
-    public class DamageHistory
+    public partial class DamageHistory
     {
         /// <summary>
         /// The player or creature this Damage History is tracking

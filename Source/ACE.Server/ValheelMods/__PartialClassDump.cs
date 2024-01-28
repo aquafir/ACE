@@ -1521,6 +1521,169 @@ namespace ACE.Server.WorldObjects
                 SendUseDoneEvent();
             }
         }
+
+        public virtual bool ValFindNextTarget()
+        {
+            stopwatch.Restart();
+
+            try
+            {
+                SelectTargetingTactic();
+                SetNextTargetTime();
+
+                var visibleTargets = GetAttackTargets();
+                if (visibleTargets.Count == 0)
+                {
+                    if (MonsterState != State.Return)
+                        MoveToHome();
+
+                    return false;
+                }
+
+                // Generally, a creature chooses whom to attack based on:
+                //  - who it was last attacking,
+                //  - who attacked it last,
+                //  - or who caused it damage last.
+
+                // When players first enter the creature's detection radius, however, none of these things are useful yet,
+                // so the creature chooses a target randomly, weighted by distance.
+
+                // Players within the creature's detection sphere are weighted by how close they are to the creature --
+                // the closer you are, the more chance you have to be selected to be attacked.
+
+                var prevAttackTarget = AttackTarget;
+
+                switch (CurrentTargetingTactic)
+                {
+                    case TargetingTactic.None:
+
+                        Console.WriteLine($"{Name}.FindNextTarget(): TargetingTactic.None");
+                        break; // same as focused?
+
+                    case TargetingTactic.Random:
+
+                        // this is a very common tactic with monsters,
+                        // although it is not truly random, it is weighted by distance
+                        var targetDistances = BuildTargetDistance(visibleTargets);
+                        AttackTarget = SelectWeightedDistance(targetDistances);
+                        break;
+
+                    case TargetingTactic.Focused:
+
+                        break; // always stick with original target?
+
+                    case TargetingTactic.LastDamager:
+
+                        var lastDamager = DamageHistory.LastDamager?.TryGetAttacker() as Creature;
+                        if (lastDamager != null && lastDamager is Player || lastDamager != null && lastDamager.IsCombatPet)
+                            AttackTarget = lastDamager;
+                        else
+                        {
+                            var newTargetDistances = BuildTargetDistance(visibleTargets);
+                            AttackTarget = SelectWeightedDistance(newTargetDistances);
+                        }
+                        break;
+
+                    case TargetingTactic.TopDamager:
+
+                        var topDamager = DamageHistory.TopDamager?.TryGetAttacker() as Creature;
+                        if (topDamager != null && topDamager is Player || topDamager != null && topDamager.IsCombatPet)
+                            AttackTarget = topDamager;
+                        else
+                        {
+                            var nearest = BuildTargetDistance(visibleTargets);
+                            AttackTarget = nearest[0].Target;
+                        }
+                        break;
+
+                    // these below don't seem to be used in PY16 yet...
+
+                    case TargetingTactic.Weakest:
+
+                        // should probably shuffle the list beforehand,
+                        // in case a bunch of levels of same level are in a group,
+                        // so the same player isn't always selected
+                        var lowestLevel = visibleTargets.OrderBy(p => p.Level).FirstOrDefault();
+                        AttackTarget = lowestLevel;
+                        break;
+
+                    case TargetingTactic.Strongest:
+
+                        var highestLevel = visibleTargets.OrderByDescending(p => p.Level).FirstOrDefault();
+                        AttackTarget = highestLevel;
+                        break;
+
+                    case TargetingTactic.Nearest:
+
+                        var nearest1 = BuildTargetDistance(visibleTargets);
+                        AttackTarget = nearest1[0].Target;
+                        break;
+
+                    case TargetingTactic.HasShield:
+
+                        var hasShieldIsTank = visibleTargets.Where(p => p.GetEquippedShield() != null && IsTank).ToList();
+                        var noShieldIsTank = visibleTargets.Where(p => p.GetEquippedShield() == null && IsTank).ToList();
+                        var hasShield = visibleTargets.Where(p => p.GetEquippedShield() != null).ToList();
+                        if (hasShieldIsTank.Count > 0)
+                        {
+                            var shieldDistances = BuildTargetDistance(hasShieldIsTank);
+                            AttackTarget = SelectWeightedDistance(shieldDistances);
+                        }
+                        else if (noShieldIsTank.Count > 0)
+                        {
+                            var noShieldDistances = BuildTargetDistance(noShieldIsTank);
+                            AttackTarget = SelectWeightedDistance(noShieldDistances);
+                        }
+                        else if (hasShield.Count > 0)
+                        {
+                            var shieldDistances = BuildTargetDistance(hasShield);
+                            AttackTarget = SelectWeightedDistance(shieldDistances);
+                        }
+                        else if (hasShieldIsTank.Count == 0 && hasShield.Count == 0 && noShieldIsTank.Count == 0)
+                        {
+                            var topDamager1 = DamageHistory.TopDamager?.TryGetAttacker() as Creature;
+                            if (topDamager1 != null && topDamager1 is Player || topDamager1 != null && topDamager1.IsCombatPet)
+                                AttackTarget = topDamager1;
+                            else
+                            {
+                                var nearest2 = BuildTargetDistance(visibleTargets);
+                                AttackTarget = nearest2[0].Target;
+                            }
+                        }
+                        break;
+
+                    case TargetingTactic.HighestThreat:
+
+                        var highestThreat = DamageHistory.HighestThreat?.TryGetAttacker() as Creature;
+                        var topThreatDamager = DamageHistory.TopDamager?.TryGetAttacker() as Creature;
+                        if (DamageHistory.HighestThreat != null && DamageHistory.TopDamager != null)
+                        {
+                            if (DamageHistory.HighestThreat.TotalThreat > DamageHistory.TopDamager.TotalDamage)
+                                AttackTarget = highestThreat;
+                            else
+                                AttackTarget = topThreatDamager;
+                        }
+                        else
+                        {
+                            var nearestThreat = BuildTargetDistance(visibleTargets);
+                            AttackTarget = nearestThreat[0].Target;
+                        }
+                        break;
+                }
+
+                //Console.WriteLine($"{Name}.FindNextTarget = {AttackTarget.Name}");
+
+                if (AttackTarget != null && AttackTarget != prevAttackTarget)
+                    EmoteManager.OnNewEnemy(AttackTarget);
+
+                return AttackTarget != null;
+            }
+            finally
+            {
+                ServerPerformanceMonitor.AddToCumulativeEvent(ServerPerformanceMonitor.CumulativeEventHistoryType.Monster_Awareness_FindNextTarget, stopwatch.Elapsed.TotalSeconds);
+            }
+        }
+
     }
 }
 
@@ -1536,7 +1699,7 @@ namespace ACE.Server.WorldObjects
             CreateSpellProjectiles(spell, target, weapon, isWeaponSpell, fromProc);
         }
     }
-} 
+}
 
 namespace ACE.Server.WorldObjects
 {
@@ -1620,4 +1783,83 @@ namespace ACE.Server.WorldObjects
             return (float)maxVelocity;
         }
     }
+}
+
+namespace ACE.Server.Entity
+{
+    public partial class DamageHistoryInfo
+    {
+        public readonly int DoTOwnerGuid;
+        public float TotalThreat;
+
+
+        //public DamageHistoryInfo(WorldObject attacker, float totalDamage = 0.0f)
+        //{
+        //    Attacker = new WeakReference<WorldObject>(attacker);
+
+        //    Guid = attacker.Guid;
+        //    Name = attacker.Name;
+        //    DoTOwnerGuid = attacker.DoTOwnerGuid;
+
+        //    TotalDamage = totalDamage;
+        //    TotalThreat = totalDamage;
+
+        //    var tankTotalThreatMod = 5.0f;
+
+        //    if (attacker is Player player)
+        //    {
+        //        if (player.IsTank)
+        //        {
+        //            if (player.TauntTimerActive)
+        //                tankTotalThreatMod = 10.0f;
+
+        //            TotalThreat *= tankTotalThreatMod;
+        //        }
+        //        else
+        //            TotalThreat *= totalDamage * 0.5f;
+        //    }
+
+        //    if (attacker is CombatPet combatPet && combatPet.P_PetOwner != null)
+        //        PetOwner = new WeakReference<Player>(combatPet.P_PetOwner);
+
+        //    if (attacker.WeenieClassId == 300501)
+        //    {
+        //        foreach (var p in PlayerManager.GetAllOnline())
+        //        {
+        //            if (p.Guid.Full == attacker.DoTOwnerGuid)
+        //            {
+        //                if (DoTOwnerGuid != 0)
+        //                {
+        //                    Guid = p.Guid;
+        //                    Name = p.Name;
+        //                }
+        //            }
+        //        }
+        //    }
+        //}
+
+    }
+}
+
+
+namespace ACE.Server.Entity
+{
+    public partial class DamageHistory
+    {
+        public readonly Dictionary<ObjectGuid, DamageHistoryInfo> TotalThreat = new Dictionary<ObjectGuid, DamageHistoryInfo>();
+
+        public DamageHistoryInfo HighestThreat => GetHighestThreat();
+
+        public DamageHistoryInfo GetHighestThreat(bool includeSelf = true)
+        {
+            var sorted = TotalThreat.Values.Where(wo => includeSelf || wo.Guid != Creature.Guid).OrderByDescending(wo => wo.TotalThreat);
+
+            return sorted.FirstOrDefault();
+        }
+    }
+}
+
+public static class ValExtensions
+{
+
 }

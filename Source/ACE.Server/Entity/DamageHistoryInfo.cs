@@ -5,7 +5,7 @@ using ACE.Server.WorldObjects;
 
 namespace ACE.Server.Entity
 {
-    public class DamageHistoryInfo
+    public partial class DamageHistoryInfo
     {
         public readonly WeakReference<WorldObject> Attacker;
 

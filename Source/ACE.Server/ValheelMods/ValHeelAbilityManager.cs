@@ -60,7 +60,7 @@ namespace ACE.Server.WorldObjects
             if (MissileAoE == true && currentUnixTime - LastMissileAoETimestamp < 30)
             {
                 MissileAoE = false;
-                player.Session.Network.EnqueueSend(new GameMessageSystemChat($"You can't use this ability yet.", ChatMessageType.Broadcast));
+                //player.Session.Network.EnqueueSend(new GameMessageSystemChat($"You can't use this ability yet.", ChatMessageType.Broadcast));
             }
 
             if (MissileAoE == true && currentUnixTime - LastMissileAoETimestamp >= 30)
