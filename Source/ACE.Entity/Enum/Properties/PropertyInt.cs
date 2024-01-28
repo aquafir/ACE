@@ -629,6 +629,64 @@ namespace ACE.Entity.Enum.Properties
         /// </summary>
         [ServerOnly]
         InventoryOrder                          = 9015,
+
+
+        [ServerOnly]
+        RaisedStr = 9016,
+        [ServerOnly]
+        RaisedEnd = 9017,
+        [ServerOnly]
+        RaisedCoord = 9018,
+        [ServerOnly]
+        RaisedQuick = 9019,
+        [ServerOnly]
+        RaisedFocus = 9020,
+        [ServerOnly]
+        RaisedSelf = 9021,
+        // new vitals
+        [ServerOnly]
+        RaisedHealth = 9022,
+        [ServerOnly]
+        RaisedStamina = 9023,
+        [ServerOnly]
+        RaisedMana = 9024,
+        [ServerOnly]
+        LastLevel = 9035,
+        [ServerOnly]
+        NumberOfPets = 9036,
+        [ServerOnly]
+        TotalPrestige = 9037,
+        [ServerOnly]
+        AvailablePrestige = 9037,
+        [Ephemeral]
+        MirraArmorBonus = 9038,
+        MirraWeaponBonus = 9039,
+        Sockets = 9041,
+        MirraRaingBonus = 9042,
+        [ServerOnly]
+        LastTime = 9043,
+        [ServerOnly]
+        BestTime = 9044,
+        [ServerOnly]
+        BankAccountNumber = 9045,
+        [ServerOnly]
+        MonsterKillsMilestones = 9046,
+        HcPyrealsWonMilestones = 9047,
+        HcScoreMilestones = 9048,
+        LevelMilestones = 9049,
+        PrestigeMilestones = 9050,
+        [ServerOnly]
+        HoTTicks = 9051,
+        HoTDuration = 9052,
+        MaxHoTTicks = 9053,
+        MaxHoTDuration = 9054,
+        WarChannelTimerDuration = 9055,
+        DoTOwnerGuid = 9056,
+        NumOfChannelCasts = 9057,
+        TankDefenseRatingIncrease = 9058,
+        DamageRatingIncrease = 9059,
+        HoTsTicked = 9060,
+        HoTLevel = 9061,
     }
 
     public static class PropertyIntExtensions
