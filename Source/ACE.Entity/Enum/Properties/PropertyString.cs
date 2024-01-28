@@ -96,6 +96,15 @@ namespace ACE.Entity.Enum.Properties
         GodState                        = 9006,
         [ServerOnly]
         TinkerLog                       = 9007,
+
+
+
+
+        //Valheel
+        [ServerOnly]
+        SpeedRunTime = 9008,
+        [ServerOnly]
+        HcAge = 9009
     }
 
     public static class PropertyStringExtensions
