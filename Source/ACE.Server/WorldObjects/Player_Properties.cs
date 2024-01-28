@@ -1449,12 +1449,6 @@ namespace ACE.Server.WorldObjects
             set { if (!value.HasValue) RemoveProperty(PropertyInt.LastLevel); else SetProperty(PropertyInt.LastLevel, value.Value); }
         }
 
-        public double? LastPortalTeleportTimestamp
-        {
-            get => GetProperty(PropertyFloat.LastPortalTeleportTimestamp);
-            set { if (!value.HasValue) RemoveProperty(PropertyFloat.LastPortalTeleportTimestamp); else SetProperty(PropertyFloat.LastPortalTeleportTimestamp, value.Value); }
-        }
-
         public int? NumberOfPets
         {
             get => GetProperty(PropertyInt.NumberOfPets);

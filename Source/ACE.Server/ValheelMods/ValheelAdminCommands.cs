@@ -21,7 +21,7 @@ namespace ACE.Server.Command.Handlers
         [CommandHandler("updateleaderboard", AccessLevel.Admin, CommandHandlerFlag.RequiresWorld, "Forces an update to the Hc leaderboard in ValHeel Discord")]
         public static void HandleUpdateLeaderboard(Session session, params string[] parameters)
         {
-            DiscordRelay.UpdateHcLeaderboard();
+            //DiscordRelay.UpdateHcLeaderboard();
         }
 
         [CommandHandler("holtup", AccessLevel.Admin, CommandHandlerFlag.ConsoleInvoke, "Moves errybody (offline) to Holt")]

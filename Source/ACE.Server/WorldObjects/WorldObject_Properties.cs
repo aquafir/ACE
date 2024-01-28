@@ -3091,12 +3091,6 @@ namespace ACE.Server.WorldObjects
             set { if (!value) RemoveProperty(PropertyBool.Empowered); else SetProperty(PropertyBool.Empowered, value); }
         }
 
-        public bool AiAcceptEverything
-        {
-            get => GetProperty(PropertyBool.AiAcceptEverything) ?? false;
-            set { if (!value) RemoveProperty(PropertyBool.AiAcceptEverything); else SetProperty(PropertyBool.AiAcceptEverything, value); }
-        }
-
         public bool Proto
         {
             get => GetProperty(PropertyBool.Proto) ?? false;
