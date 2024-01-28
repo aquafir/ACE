@@ -135,4 +135,9 @@ partial class WorldObject
         get => GetProperty(PropertyBool.IsAbilityItem) ?? false;
         set { if (!value) RemoveProperty(PropertyBool.IsAbilityItem); else SetProperty(PropertyBool.IsAbilityItem, value); }
     }
+
+    public bool IsGunblade { get => GetProperty(PropertyBool.GunBlade) != null; }
+
+    public bool IsMirra { get => GetProperty(PropertyInt.ItemType) == 2304; }
+
 }

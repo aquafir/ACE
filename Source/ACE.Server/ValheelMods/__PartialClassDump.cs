@@ -15,11 +15,18 @@ using ACE.Server.Network.GameEvent.Events;
 using System.Numerics;
 using ACE.Common;
 using ACE.Server.Physics.Animation;
+using ACE.Database;
+using ACE.Entity;
+using ACE.Server.Factories;
+using ACE.Server.Managers;
+using ACE.Server.Physics;
 
 namespace ACE.Server.WorldObjects
 {
     partial class Player
     {
+        public static readonly float GunBladeDistance = 80.0f;
+
         public void UnSneak()
         {
             if (CloakStatus == CloakStatus.Off)
@@ -488,6 +495,731 @@ namespace ACE.Server.WorldObjects
                 LifestoneProtectionDispel();
         }
 
+        public List<Creature> GetMissileCleaveTarget(Creature target, WorldObject weapon)
+        {
+            var player = this as Player;
+
+            if (!weapon.IsCleaving) return null;
+
+            // sort visible objects by ascending distance
+            var visible = PhysicsObj.ObjMaint.GetVisibleObjectsValuesWhere(o => o.WeenieObj.WorldObject != null);
+            visible.Sort(DistanceComparator);
+
+            var cleaveTargets = new List<Creature>();
+            var totalCleaves = weapon.CleaveTargets;
+
+            foreach (var obj in visible)
+            {
+                // cleaving skips original target
+                if (obj.ID == target.PhysicsObj.ID || target == null)
+                    continue;
+
+                // only cleave creatures
+                var creature = obj.WeenieObj.WorldObject as Creature;
+                if (creature == null || creature.Teleporting || creature.IsDead) continue;
+
+                if (player != null && player.CheckPKStatusVsTarget(creature, null) != null)
+                    continue;
+
+                if (!creature.Attackable && creature.TargetingTactic == TargetingTactic.None || creature.Teleporting)
+                    continue;
+
+                if (creature is CombatPet && (player != null || this is CombatPet))
+                    continue;
+
+                // no objects in cleave range
+                var cylDist = GetCylinderDistance(creature);
+                if (cylDist > MissileCleaveCylRange)
+                    return cleaveTargets;
+
+                // only cleave in front of attacker
+                var angle = GetAngle(creature);
+                if (Math.Abs(angle) > MissileCleaveAngle / 2.0f)
+                    continue;
+
+                // found cleavable object
+                cleaveTargets.Add(creature);
+                if (cleaveTargets.Count == totalCleaves)
+                    break;
+            }
+            return cleaveTargets;
+        }
+
+        public List<Creature> GetMissileAoETarget(Creature target, WorldObject weapon)
+        {
+            var player = this as Player;
+
+            // sort visible objects by ascending distance
+            var visible = PhysicsObj.ObjMaint.GetVisibleObjectsValuesWhere(o => o.WeenieObj.WorldObject != null);
+            visible.Sort(DistanceComparator);
+
+            var cleaveTargets = new List<Creature>();
+            var totalCleaves = weapon.CleaveTargets;
+
+            foreach (var obj in visible)
+            {
+                // only cleave creatures
+                var creature = obj.WeenieObj.WorldObject as Creature;
+                if (creature == null || creature.Teleporting || creature.IsDead) continue;
+
+                if (player != null && player.CheckPKStatusVsTarget(creature, null) != null)
+                    continue;
+
+                if (!creature.Attackable && creature.TargetingTactic == TargetingTactic.None || creature.Teleporting)
+                    continue;
+
+                if (creature is CombatPet && (player != null || this is CombatPet))
+                    continue;
+
+                // no objects in cleave range
+                var cylDist = GetCylinderDistance(creature);
+                if (cylDist > MissileAoECylRange)
+                    return cleaveTargets;
+
+                // only cleave in front of attacker
+                var angle = GetAngle(creature);
+                if (Math.Abs(angle) > MissileAoEAngle)
+                    continue;
+
+                // found cleavable object
+                cleaveTargets.Add(creature);
+                if (cleaveTargets.Count == totalCleaves)
+                    break;
+            }
+            return cleaveTargets;
+        }
+
+        public void CreateDoTSpot(Player player, List<Creature> targets)
+        {
+            if (targets != null)
+            {
+                var dot = DatabaseManager.World.GetCachedWeenie(300501);
+
+                List<WorldObject> dotObjects = new List<WorldObject>();
+
+                foreach (var m in targets)
+                {
+                    var newDot = WorldObjectFactory.CreateNewWorldObject(dot);
+
+                    dotObjects.Add(newDot);
+                }
+
+                for (int i = 0; i < dotObjects.Count; i++)
+                {
+                    dotObjects[i].DoTOwnerGuid = (int)player.Guid.Full;
+                    dotObjects[i].Damage = (int)(targets[i].Health.Current * 0.005f);
+                    dotObjects[i].Location = targets[i].Location;
+                    dotObjects[i].Location.LandblockId = new LandblockId(dotObjects[i].Location.GetCell());
+                    dotObjects[i].EnterWorld();
+                }
+            }
+        }
+
+        public void GunBladeAttack(WorldObject target, int attackSequence, bool subsequent = false)
+        {
+            //log.Info($"{Name}.Attack({target.Name}, {attackSequence})");
+            var weapon = GetEquippedMeleeWeapon();
+
+            if (AttackSequence != attackSequence)
+                return;
+
+            if (CombatMode != CombatMode.Melee || MeleeTarget == null && !weapon.IsGunblade || IsBusy || !IsAlive || suicideInProgress)
+            {
+                OnAttackDone();
+                return;
+            }
+
+            var creature = target as Creature;
+            if (creature == null || !creature.IsAlive)
+            {
+                OnAttackDone();
+                return;
+            }
+
+            var animLength = DoSwingMotion(target, out var attackFrames);
+            if (animLength == 0)
+            {
+                OnAttackDone();
+                return;
+            }
+
+            // point of no return beyond this point -- cannot be cancelled
+            Attacking = true;
+
+            if (subsequent)
+            {
+                // client shows hourglass, until attack done is received
+                // retail only did this for subsequent attacks w/ repeat attacks on
+                Session.Network.EnqueueSend(new GameEventCombatCommenceAttack(Session));
+            }
+
+            var attackType = GetWeaponAttackType(weapon);
+            var numStrikes = GetNumStrikes(attackType);
+            var swingTime = animLength / numStrikes / 1.5f;
+
+            var actionChain = new ActionChain();
+
+            // stamina usage
+            // TODO: ensure enough stamina for attack
+            var staminaCost = GetAttackStamina(GetPowerRange());
+            UpdateVitalDelta(Stamina, -staminaCost);
+
+            if (numStrikes != attackFrames.Count)
+            {
+                //log.Warn($"{Name}.GetAttackFrames(): MotionTableId: {MotionTableId:X8}, MotionStance: {CurrentMotionState.Stance}, Motion: {GetSwingAnimation()}, AttackFrames.Count({attackFrames.Count}) != NumStrikes({numStrikes})");
+                numStrikes = attackFrames.Count;
+            }
+
+            // handle self-procs
+            TryProcEquippedItems(this, this, true, weapon);
+
+            var prevTime = 0.0f;
+            var ammo = GetEquippedAmmo();
+
+            if (ammo == null && weapon.IsGunblade)
+            {
+                Attacking = false;
+                OnAttackDone();
+                return;
+            }
+
+            var projectileSpeed = GetGunBladeProjectileSpeed();
+            var aimVelocity = GetAimVelocity(target, projectileSpeed);
+            var aimLevel = GetAimLevel(aimVelocity);
+            var localOrigin = GetProjectileSpawnOrigin(ammo.WeenieClassId, aimLevel);
+            var velocity = CalculateProjectileVelocity(localOrigin, target, projectileSpeed, out Vector3 origin, out Quaternion orientation);
+
+            for (var i = 0; i < numStrikes; i++)
+            {
+                // are there animation hooks for damage frames?
+                //if (numStrikes > 1 && !TwoHandedCombat)
+                //actionChain.AddDelaySeconds(swingTime);
+                actionChain.AddDelaySeconds(attackFrames[i].time * animLength - prevTime);
+                prevTime = attackFrames[i].time * animLength;
+
+                actionChain.AddAction(this, () =>
+                {
+                    if (IsDead)
+                    {
+                        Attacking = false;
+                        OnAttackDone();
+                        return;
+                    }
+
+                    // handle target procs                  
+
+                    var ammo = GetEquippedAmmo();
+
+                    if (weapon != null && weapon.IsCleaving && weapon.IsGunblade == true)
+                    {
+                        var cleave = GetCleaveTarget(creature, weapon);
+
+                        foreach (var cleaveHit in cleave)
+                        {
+                            // target procs don't happen for cleaving
+                            DamageTarget(cleaveHit, weapon);
+                            if (ammo != null)
+                            {
+                                LaunchProjectile(weapon, ammo, cleaveHit, origin, orientation, velocity);
+                                UpdateAmmoAfterLaunch(ammo);
+                            }
+                        }
+                    }
+
+                    if (weapon != null && weapon.IsGunblade == true && ammo == null)
+                    {
+                        TryProcEquippedItems(this, creature, false, weapon);
+                    }
+
+                    if (weapon != null && weapon.IsGunblade == true && ammo != null)
+                    {
+                        LaunchProjectile(weapon, ammo, target, origin, orientation, velocity);
+                        UpdateAmmoAfterLaunch(ammo);
+                    }
+                });
+            }
+
+            actionChain.AddDelaySeconds(animLength - prevTime);
+
+            actionChain.AddAction(this, () =>
+            {
+                Attacking = false;
+
+                // powerbar refill timing
+                var refillMod = IsDualWieldAttack ? 0.8f : 1.0f;    // dual wield powerbar refills 20% faster
+
+                PowerLevel = AttackQueue.Fetch();
+
+                var nextRefillTime = PowerLevel * refillMod;
+                NextRefillTime = DateTime.UtcNow.AddSeconds(nextRefillTime);
+                var dotRoll = ThreadSafeRandom.Next(0.0f, 1.0f);
+
+                var dist = GetCylinderDistance(target);
+
+                if (creature.IsAlive && GetCharacterOption(CharacterOption.AutoRepeatAttacks) && IsMeleeVisible(target) && !IsBusy && !AttackCancelled && weapon.IsGunblade == true)
+                {
+                    // client starts refilling power meter
+                    Session.Network.EnqueueSend(new GameEventAttackDone(Session));
+
+                    var nextAttack = new ActionChain();
+                    nextAttack.AddDelaySeconds(nextRefillTime);
+                    nextAttack.AddAction(this, () => GunBladeAttack(target, attackSequence, true));
+                    nextAttack.EnqueueChain();
+
+                    if (IsDps)
+                    {
+                        if (MeleeDoTChance >= dotRoll)
+                        {
+                            //var dot = DatabaseManager.World.GetCachedWeenie(300501);
+                            var dotTarget = target as Creature;
+                            var targets = GetDoTTarget(dotTarget);
+                            //var obj = WorldObjectFactory.CreateNewWorldObject(dot);
+
+                            CreateDoTSpot(this, targets);
+                        }
+                    }
+                    if (IsTank)
+                    {
+                        var chanceRoll = ThreadSafeRandom.Next(0.0f, 1.0f);
+
+                        if (chanceRoll < 0.33f)
+                        {
+                            IsTankBuffed = true;
+                        }
+                    }
+                    if (DoBrutalizeAttack)
+                    {
+                        var currentUnixTime = Time.GetUnixTime();
+                        DoBrutalizeAttack = false;
+                        LastBrutalizeTimestamp = currentUnixTime;
+                        PlayParticleEffect(PlayScript.EnchantDownRed, Guid);
+                    }
+                    if (IsSneaking == true)
+                    {
+                        IsSneaking = false;
+                        UnSneak();
+                        SetProperty(PropertyInt.CloakStatus, (int)CloakStatus.Off);
+                        PlayParticleEffect(PlayScript.EnchantUpGreen, Guid);
+                    }
+                }
+
+                else if (creature.IsAlive && GetCharacterOption(CharacterOption.AutoRepeatAttacks) && IsMeleeVisible(target) && !IsBusy && !AttackCancelled)
+                {
+                    // client starts refilling power meter
+                    Session.Network.EnqueueSend(new GameEventAttackDone(Session));
+
+                    var nextAttack = new ActionChain();
+                    nextAttack.AddDelaySeconds(nextRefillTime);
+                    nextAttack.AddAction(this, () => GunBladeAttack(target, attackSequence, true));
+                    nextAttack.EnqueueChain();
+
+                    if (IsDps)
+                    {
+                        if (MeleeDoTChance >= dotRoll)
+                        {
+                            //var dot = DatabaseManager.World.GetCachedWeenie(300501);
+                            var dotTarget = target as Creature;
+                            var targets = GetDoTTarget(dotTarget);
+                            //var obj = WorldObjectFactory.CreateNewWorldObject(dot);
+
+                            CreateDoTSpot(this, targets);
+                        }
+                    }
+                    if (IsTank)
+                    {
+                        var chanceRoll = ThreadSafeRandom.Next(0.0f, 1.0f);
+
+                        if (chanceRoll < 0.33f)
+                        {
+                            IsTankBuffed = true;
+                        }
+                    }
+                    if (DoBrutalizeAttack)
+                    {
+                        var currentUnixTime = Time.GetUnixTime();
+                        DoBrutalizeAttack = false;
+                        LastBrutalizeTimestamp = currentUnixTime;
+                        PlayParticleEffect(PlayScript.EnchantDownRed, Guid);
+                    }
+                    if (IsSneaking == true)
+                    {
+                        IsSneaking = false;
+                        UnSneak();
+                        SetProperty(PropertyInt.CloakStatus, (int)CloakStatus.Off);
+                        PlayParticleEffect(PlayScript.EnchantUpGreen, Guid);
+                    }
+                }
+                else
+                {
+                    if (DoBrutalizeAttack)
+                    {
+                        var currentUnixTime = Time.GetUnixTime();
+                        DoBrutalizeAttack = false;
+                        LastBrutalizeTimestamp = currentUnixTime;
+                        PlayParticleEffect(PlayScript.EnchantDownRed, Guid);
+                    }
+                    if (IsSneaking == true)
+                    {
+                        IsSneaking = false;
+                        UnSneak();
+                        SetProperty(PropertyInt.CloakStatus, (int)CloakStatus.Off);
+                        PlayParticleEffect(PlayScript.EnchantUpGreen, Guid);
+                    }
+
+                    OnAttackDone();
+                }
+            });
+
+            actionChain.EnqueueChain();
+
+            if (UnderLifestoneProtection)
+                LifestoneProtectionDispel();
+        }
+
+
+
+
+        //Re-routes of renamed methods for involved code
+        public void ValAttack(WorldObject target, int attackSequence, bool subsequent = false)
+        {
+            //log.Info($"{Name}.Attack({target.Name}, {attackSequence})");
+            var weapon = GetEquippedMeleeWeapon();
+
+            if (AttackSequence != attackSequence)
+                return;
+
+            if (CombatMode != CombatMode.Melee || MeleeTarget == null && weapon == null || IsBusy || !IsAlive || suicideInProgress)
+            {
+                OnAttackDone();
+                return;
+            }
+            else if (CombatMode != CombatMode.Melee || MeleeTarget == null && !weapon.IsGunblade || IsBusy || !IsAlive || suicideInProgress)
+            {
+                OnAttackDone();
+                return;
+            }
+
+            var creature = target as Creature;
+            if (creature == null || !creature.IsAlive)
+            {
+                OnAttackDone();
+                return;
+            }
+
+            var animLength = DoSwingMotion(target, out var attackFrames);
+            if (animLength == 0)
+            {
+                OnAttackDone();
+                return;
+            }
+
+            // point of no return beyond this point -- cannot be cancelled
+            Attacking = true;
+
+            if (subsequent)
+            {
+                // client shows hourglass, until attack done is received
+                // retail only did this for subsequent attacks w/ repeat attacks on
+                Session.Network.EnqueueSend(new GameEventCombatCommenceAttack(Session));
+            }
+
+            var attackType = GetWeaponAttackType(weapon);
+            var numStrikes = GetNumStrikes(attackType);
+            var swingTime = animLength / numStrikes / 1.5f;
+
+            var actionChain = new ActionChain();
+
+            // stamina usage
+            // TODO: ensure enough stamina for attack
+            var staminaCost = GetAttackStamina(GetPowerRange());
+            UpdateVitalDelta(Stamina, -staminaCost);
+
+            if (numStrikes != attackFrames.Count)
+            {
+                //log.Warn($"{Name}.GetAttackFrames(): MotionTableId: {MotionTableId:X8}, MotionStance: {CurrentMotionState.Stance}, Motion: {GetSwingAnimation()}, AttackFrames.Count({attackFrames.Count}) != NumStrikes({numStrikes})");
+                numStrikes = attackFrames.Count;
+            }
+
+            // handle self-procs
+            TryProcEquippedItems(this, this, true, weapon);
+
+            var prevTime = 0.0f;
+            bool targetProc = false;
+
+            for (var i = 0; i < numStrikes; i++)
+            {
+                // are there animation hooks for damage frames?
+                //if (numStrikes > 1 && !TwoHandedCombat)
+                //actionChain.AddDelaySeconds(swingTime);
+                actionChain.AddDelaySeconds(attackFrames[i].time * animLength - prevTime);
+                prevTime = attackFrames[i].time * animLength;
+
+                actionChain.AddAction(this, () =>
+                {
+                    if (IsDead)
+                    {
+                        Attacking = false;
+                        OnAttackDone();
+                        return;
+                    }
+
+                    var damageEvent = DamageTarget(creature, weapon);
+
+                    // handle target procs
+                    if (damageEvent != null && damageEvent.HasDamage && !targetProc)
+                    {
+                        TryProcEquippedItems(this, creature, false, weapon);
+                        targetProc = true;
+                    }
+
+                    if (weapon != null && weapon.IsCleaving && weapon.IsGunblade == false)
+                    {
+                        var cleave = GetCleaveTarget(creature, weapon);
+
+                        foreach (var cleaveHit in cleave)
+                        {
+                            // target procs don't happen for cleaving
+                            DamageTarget(cleaveHit, weapon);
+                        }
+                    }
+
+                    var ammo = GetEquippedAmmo();
+
+                    if (weapon != null && weapon.IsCleaving && weapon.IsGunblade == true)
+                    {
+                        var cleave = GetCleaveTarget(creature, weapon);
+
+                        foreach (var cleaveHit in cleave)
+                        {
+                            // target procs don't happen for cleaving
+                            //var ammo = GetEquippedAmmo();
+                            if (ammo != null && ammo.WeenieClassId == 300444)
+                            {
+                                var projectileSpeed = GetGunBladeProjectileSpeed();
+                                var aimVelocity = GetAimVelocity(target, projectileSpeed);
+                                var aimLevel = GetAimLevel(aimVelocity);
+                                var localOrigin = GetProjectileSpawnOrigin(ammo.WeenieClassId, aimLevel);
+                                var velocity = CalculateProjectileVelocity(localOrigin, target, projectileSpeed, out Vector3 origin, out Quaternion orientation);
+
+                                DamageTarget(cleaveHit, weapon);
+                                LaunchProjectile(weapon, ammo, target, origin, orientation, velocity);
+
+                                if (ammo.StackSize != null)
+                                    UpdateAmmoAfterLaunch(ammo);
+                            }
+                            else
+                            {
+                                DamageTarget(cleaveHit, weapon);
+
+                            }
+
+                        }
+                    }
+
+                    if (weapon != null && weapon.IsGunblade == true && ammo != null)
+                    {
+                        if (ammo != null && ammo.WeenieClassId == 300444)
+                        {
+                            // var ammo = GetEquippedAmmo();
+                            var projectileSpeed = GetGunBladeProjectileSpeed();
+                            var aimVelocity = GetAimVelocity(target, projectileSpeed);
+                            var aimLevel = GetAimLevel(aimVelocity);
+                            var localOrigin = GetProjectileSpawnOrigin(ammo.WeenieClassId, aimLevel);
+                            var velocity = CalculateProjectileVelocity(localOrigin, target, projectileSpeed, out Vector3 origin, out Quaternion orientation);
+
+                            LaunchProjectile(weapon, ammo, target, origin, orientation, velocity);
+
+                            if (ammo.StackSize != null)
+                                UpdateAmmoAfterLaunch(ammo);
+                        }
+                    }
+                });
+            }
+
+            //actionChain.AddDelaySeconds(animLength - swingTime * numStrikes);
+            actionChain.AddDelaySeconds(animLength - prevTime);
+
+            actionChain.AddAction(this, () =>
+            {
+                Attacking = false;
+
+                // powerbar refill timing
+                var refillMod = IsDualWieldAttack ? 0.8f : 1.0f;    // dual wield powerbar refills 20% faster
+
+                PowerLevel = AttackQueue.Fetch();
+
+                var nextRefillTime = PowerLevel * refillMod;
+                NextRefillTime = DateTime.UtcNow.AddSeconds(nextRefillTime);
+                var dotRoll = ThreadSafeRandom.Next(0.0f, 1.0f);
+
+                var dist = GetCylinderDistance(target);
+
+                if (creature.IsAlive && GetCharacterOption(CharacterOption.AutoRepeatAttacks) && IsMeleeVisible(target) && !IsBusy && !AttackCancelled && weapon == null)
+                {
+                    // client starts refilling power meter
+                    Session.Network.EnqueueSend(new GameEventAttackDone(Session));
+
+                    var nextAttack = new ActionChain();
+                    nextAttack.AddDelaySeconds(nextRefillTime);
+                    nextAttack.AddAction(this, () => Attack(target, attackSequence, true));
+                    nextAttack.EnqueueChain();
+
+                    if (IsDps)
+                    {
+                        if (MeleeDoTChance >= dotRoll)
+                        {
+                            //var dot = DatabaseManager.World.GetCachedWeenie(300501);
+                            var dotTarget = target as Creature;
+                            var targets = GetDoTTarget(dotTarget);
+                            //var obj = WorldObjectFactory.CreateNewWorldObject(dot);
+
+                            CreateDoTSpot(this, targets);
+                        }
+                    }
+                    if (IsTank)
+                    {
+                        var chanceRoll = ThreadSafeRandom.Next(0.0f, 1.0f);
+
+                        if (chanceRoll < 0.33f)
+                        {
+                            IsTankBuffed = true;
+                        }
+                    }
+                    if (DoBrutalizeAttack)
+                    {
+                        var currentUnixTime = Time.GetUnixTime();
+                        DoBrutalizeAttack = false;
+                        LastBrutalizeTimestamp = currentUnixTime;
+                        PlayParticleEffect(PlayScript.EnchantDownRed, Guid);
+                    }
+                    if (IsSneaking == true)
+                    {
+                        IsSneaking = false;
+                        UnSneak();
+                        SetProperty(PropertyInt.CloakStatus, (int)CloakStatus.Off);
+                        PlayParticleEffect(PlayScript.EnchantUpGreen, Guid);
+                    }
+                }
+                else if (creature.IsAlive && GetCharacterOption(CharacterOption.AutoRepeatAttacks) && IsMeleeVisible(target) && !IsBusy && !AttackCancelled && weapon.IsGunblade == true)
+                {
+                    // client starts refilling power meter
+                    Session.Network.EnqueueSend(new GameEventAttackDone(Session));
+
+                    var nextAttack = new ActionChain();
+                    nextAttack.AddDelaySeconds(nextRefillTime);
+                    nextAttack.AddAction(this, () => Attack(target, attackSequence, true));
+                    nextAttack.EnqueueChain();
+
+                    if (IsDps)
+                    {
+                        if (MeleeDoTChance >= dotRoll)
+                        {
+                            //var dot = DatabaseManager.World.GetCachedWeenie(300501);
+                            var dotTarget = target as Creature;
+                            var targets = GetDoTTarget(dotTarget);
+                            //var obj = WorldObjectFactory.CreateNewWorldObject(dot);
+
+                            CreateDoTSpot(this, targets);
+                        }
+                    }
+                    if (IsTank)
+                    {
+                        var chanceRoll = ThreadSafeRandom.Next(0.0f, 1.0f);
+
+                        if (chanceRoll < 0.33f)
+                        {
+                            IsTankBuffed = true;
+                        }
+                    }
+                    if (DoBrutalizeAttack)
+                    {
+                        var currentUnixTime = Time.GetUnixTime();
+                        DoBrutalizeAttack = false;
+                        LastBrutalizeTimestamp = currentUnixTime;
+                        PlayParticleEffect(PlayScript.EnchantDownRed, Guid);
+                    }
+                    if (IsSneaking == true)
+                    {
+                        IsSneaking = false;
+                        UnSneak();
+                        SetProperty(PropertyInt.CloakStatus, (int)CloakStatus.Off);
+                        PlayParticleEffect(PlayScript.EnchantUpGreen, Guid);
+                    }
+                }
+
+                else if (creature.IsAlive && GetCharacterOption(CharacterOption.AutoRepeatAttacks) && (dist <= MeleeDistance || dist <= StickyDistance && IsMeleeVisible(target)) && !IsBusy && !AttackCancelled)
+                {
+                    // client starts refilling power meter
+                    Session.Network.EnqueueSend(new GameEventAttackDone(Session));
+
+                    var nextAttack = new ActionChain();
+                    nextAttack.AddDelaySeconds(nextRefillTime);
+                    nextAttack.AddAction(this, () => Attack(target, attackSequence, true));
+                    nextAttack.EnqueueChain();
+
+                    if (IsDps)
+                    {
+                        if (MeleeDoTChance >= dotRoll)
+                        {
+                            //var dot = DatabaseManager.World.GetCachedWeenie(300501);
+                            var dotTarget = target as Creature;
+                            var targets = GetDoTTarget(dotTarget);
+                            //var obj = WorldObjectFactory.CreateNewWorldObject(dot);
+
+                            CreateDoTSpot(this, targets);
+                        }
+                    }
+                    if (IsTank)
+                    {
+                        var chanceRoll = ThreadSafeRandom.Next(0.0f, 1.0f);
+
+                        if (chanceRoll < 0.33f)
+                        {
+                            IsTankBuffed = true;
+                        }
+                    }
+                    if (DoBrutalizeAttack)
+                    {
+                        var currentUnixTime = Time.GetUnixTime();
+                        DoBrutalizeAttack = false;
+                        LastBrutalizeTimestamp = currentUnixTime;
+                        PlayParticleEffect(PlayScript.EnchantDownRed, Guid);
+                    }
+                    if (IsSneaking == true)
+                    {
+                        IsSneaking = false;
+                        UnSneak();
+                        SetProperty(PropertyInt.CloakStatus, (int)CloakStatus.Off);
+                        PlayParticleEffect(PlayScript.EnchantUpGreen, Guid);
+                    }
+                }
+                else
+                {
+                    if (DoBrutalizeAttack)
+                    {
+                        var currentUnixTime = Time.GetUnixTime();
+                        DoBrutalizeAttack = false;
+                        LastBrutalizeTimestamp = currentUnixTime;
+                        PlayParticleEffect(PlayScript.EnchantDownRed, Guid);
+                    }
+                    if (IsSneaking == true)
+                    {
+                        IsSneaking = false;
+                        UnSneak();
+                        SetProperty(PropertyInt.CloakStatus, (int)CloakStatus.Off);
+                        PlayParticleEffect(PlayScript.EnchantUpGreen, Guid);
+                    }
+
+                    OnAttackDone();
+                }
+            });
+
+            actionChain.EnqueueChain();
+
+            if (UnderLifestoneProtection)
+                LifestoneProtectionDispel();
+        }
+
         public void ValLaunchMissile(WorldObject target, int attackSequence, MotionStance stance, bool subsequent = false)
         {
             if (AttackSequence != attackSequence)
@@ -633,8 +1365,8 @@ namespace ACE.Server.WorldObjects
                     }
 
                     DoMissileAoE = false;
-                }  
-            });       
+                }
+            });
 
             // ammo remaining?
             if (!ammo.UnlimitedUse && (ammo.StackSize == null || ammo.StackSize <= 1))
@@ -664,7 +1396,7 @@ namespace ACE.Server.WorldObjects
             {
                 if (CombatMode == CombatMode.Missile)
                     EnqueueBroadcast(new GameMessageParentEvent(this, ammo, ACE.Entity.Enum.ParentLocation.RightHand, ACE.Entity.Enum.Placement.RightHandCombat));
-            }); 
+            });
 
             actionChain.AddDelaySeconds(linkTime);
 
@@ -718,100 +1450,77 @@ namespace ACE.Server.WorldObjects
                 LifestoneProtectionDispel();
         }
 
-        public List<Creature> GetMissileCleaveTarget(Creature target, WorldObject weapon)
+        public void ValHandleActionUseItem(uint itemGuid)
         {
-            var player = this as Player;
-
-            if (!weapon.IsCleaving) return null;
-
-            // sort visible objects by ascending distance
-            var visible = PhysicsObj.ObjMaint.GetVisibleObjectsValuesWhere(o => o.WeenieObj.WorldObject != null);
-            visible.Sort(DistanceComparator);
-
-            var cleaveTargets = new List<Creature>();
-            var totalCleaves = weapon.CleaveTargets;
-
-            foreach (var obj in visible)
+            if (PKLogout)
             {
-                // cleaving skips original target
-                if (obj.ID == target.PhysicsObj.ID || target == null)
-                    continue;
-
-                // only cleave creatures
-                var creature = obj.WeenieObj.WorldObject as Creature;
-                if (creature == null || creature.Teleporting || creature.IsDead) continue;
-
-                if (player != null && player.CheckPKStatusVsTarget(creature, null) != null)
-                    continue;
-
-                if (!creature.Attackable && creature.TargetingTactic == TargetingTactic.None || creature.Teleporting)
-                    continue;
-
-                if (creature is CombatPet && (player != null || this is CombatPet))
-                    continue;
-
-                // no objects in cleave range
-                var cylDist = GetCylinderDistance(creature);
-                if (cylDist > MissileCleaveCylRange)
-                    return cleaveTargets;
-
-                // only cleave in front of attacker
-                var angle = GetAngle(creature);
-                if (Math.Abs(angle) > MissileCleaveAngle / 2.0f)
-                    continue;
-
-                // found cleavable object
-                cleaveTargets.Add(creature);
-                if (cleaveTargets.Count == totalCleaves)
-                    break;
+                SendUseDoneEvent(WeenieError.YouHaveBeenInPKBattleTooRecently);
+                return;
             }
-            return cleaveTargets;
-        }
 
-        public List<Creature> GetMissileAoETarget(Creature target, WorldObject weapon)
-        {
-            var player = this as Player;
+            StopExistingMoveToChains();
 
-            // sort visible objects by ascending distance
-            var visible = PhysicsObj.ObjMaint.GetVisibleObjectsValuesWhere(o => o.WeenieObj.WorldObject != null);
-            visible.Sort(DistanceComparator);
+            var item = FindObject(itemGuid, SearchLocations.MyInventory | SearchLocations.MyEquippedItems | SearchLocations.Landblock);
 
-            var cleaveTargets = new List<Creature>();
-            var totalCleaves = weapon.CleaveTargets;
-
-            foreach (var obj in visible)
+            if (IsTrading && ItemsInTradeWindow.Contains(item.Guid))
             {
-                // only cleave creatures
-                var creature = obj.WeenieObj.WorldObject as Creature;
-                if (creature == null || creature.Teleporting || creature.IsDead) continue;
-
-                if (player != null && player.CheckPKStatusVsTarget(creature, null) != null)
-                    continue;
-
-                if (!creature.Attackable && creature.TargetingTactic == TargetingTactic.None || creature.Teleporting)
-                    continue;
-
-                if (creature is CombatPet && (player != null || this is CombatPet))
-                    continue;
-
-                // no objects in cleave range
-                var cylDist = GetCylinderDistance(creature);
-                if (cylDist > MissileAoECylRange)
-                    return cleaveTargets;
-
-                // only cleave in front of attacker
-                var angle = GetAngle(creature);
-                if (Math.Abs(angle) > MissileAoEAngle)
-                    continue;
-
-                // found cleavable object
-                cleaveTargets.Add(creature);
-                if (cleaveTargets.Count == totalCleaves)
-                    break;
+                SendUseDoneEvent(WeenieError.TradeItemBeingTraded);
+                //SendWeenieError(WeenieError.TradeItemBeingTraded);
+                return;
             }
-            return cleaveTargets;
-        }
 
+            if (item != null)
+            {
+                if (item.ItemType == ItemType.Portal)
+                {
+                    // kill pets
+                    ActionChain killPets = new ActionChain();
+
+                    killPets.AddAction(this, () =>
+                    {
+                        foreach (var monster in PhysicsObj.ObjMaint.GetVisibleObjectsValuesOfTypeCreature())
+                        {
+                            if (monster.IsCombatPet)
+                            {
+                                if (monster.PetOwner == Guid.Full)
+                                {
+                                    monster.Destroy();
+                                    NumberOfPets--;
+                                    if (NumberOfPets < 0)
+                                    {
+                                        NumberOfPets = 0;
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    killPets.EnqueueChain();
+                }
+
+                // Ability Items
+                if (item.IsAbilityItem)
+                    DoAbility(this, item);
+
+                if (item.CurrentLandblock != null && !item.Visibility && item.Guid != LastOpenedContainerId && !item.IsAbilityItem)
+                {
+                    if (IsBusy)
+                    {
+                        SendUseDoneEvent(WeenieError.YoureTooBusy);
+                        return;
+                    }
+
+                    CreateMoveToChain(item, (success) => TryUseItem(item, success));
+                }
+                else
+                    TryUseItem(item);
+            }
+            else
+            {
+                log.Debug($"{Name}.HandleActionUseItem({itemGuid:X8}): couldn't find object");
+                SendUseDoneEvent();
+            }
+        }
     }
 }
 
@@ -840,6 +1549,75 @@ namespace ACE.Server.WorldObjects
         public static readonly float MissileAoEAngle = 45.0f;
         public static readonly float DoTSpotAngle = 359;
         public static readonly float DoTSpotCylRange = 4;
+        public static readonly float GunBladeProjectileSpeed = 300.0f;
 
+        public List<Creature> GetDoTTarget(Creature target)
+        {
+            var player = this as Player;
+
+            // sort visible objects by ascending distance
+            var visible = PhysicsObj.ObjMaint.GetVisibleObjectsValuesWhere(o => o.WeenieObj.WorldObject != null);
+            visible.Sort(DistanceComparator);
+
+            var cleaveTargets = new List<Creature>();
+
+            foreach (var obj in visible)
+            {
+                // only cleave creatures
+                var creature = obj.WeenieObj.WorldObject as Creature;
+                if (creature == null || creature.Teleporting || creature.IsDead) continue;
+
+                if (player != null && player.CheckPKStatusVsTarget(creature, null) != null)
+                    continue;
+
+                if (!creature.Attackable && creature.TargetingTactic == TargetingTactic.None || creature.Teleporting)
+                    continue;
+
+                if (creature is CombatPet && (player != null || this is CombatPet))
+                    continue;
+
+                // no objects in cleave range
+                var cylDist = GetCylinderDistance(creature);
+                if (cylDist > DoTSpotCylRange)
+                    return cleaveTargets;
+
+                // only cleave in front of attacker
+                var angle = GetAngle(creature);
+                if (Math.Abs(angle) > DoTSpotAngle)
+                    continue;
+
+                // found cleavable object
+                cleaveTargets.Add(creature);
+                if (cleaveTargets.Count == 8)
+                    break;
+            }
+            return cleaveTargets;
+        }
+
+        public float GetGunBladeProjectileSpeed()
+        {
+            var gunBlade = GetEquippedMeleeWeapon();
+
+            var maxVelocity = gunBlade?.MaximumVelocity ?? GunBladeProjectileSpeed;
+
+            if (maxVelocity == 0.0f)
+            {
+                // log.Warn($"{Name}.GetMissileSpeed() - {gunBlade.Name} ({gunBlade.Guid}) has speed 0");
+
+                maxVelocity = GunBladeProjectileSpeed;
+            }
+
+            if (this is Player player && player.GetCharacterOption(CharacterOption.UseFastMissiles))
+            {
+                maxVelocity *= PropertyManager.GetDouble("fast_missile_modifier").Item;
+            }
+
+            // hard cap in physics engine
+            maxVelocity = Math.Min(maxVelocity, PhysicsGlobals.MaxVelocity);
+
+            //Console.WriteLine($"MaxVelocity: {maxVelocity}");
+
+            return (float)maxVelocity;
+        }
     }
 }
