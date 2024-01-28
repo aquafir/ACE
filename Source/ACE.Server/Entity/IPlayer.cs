@@ -11,7 +11,7 @@ namespace ACE.Server.Entity
     /// This interface is used by Player and OfflinePlayer.
     /// It allows us to maintain two separate lists for online players (Player) and offline players (OfflinePlayer) in PlayerManager and return generic IPlayer results.
     /// </summary>
-    public interface IPlayer
+    public partial interface IPlayer
     {
         ObjectGuid Guid { get; }
 

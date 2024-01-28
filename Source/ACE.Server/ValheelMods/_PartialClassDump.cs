@@ -189,3 +189,40 @@ namespace ACE.Server.Entity {
         }
     }
 }
+
+
+namespace ACE.Server.Entity
+{
+    /// <summary>
+    /// This interface is used by Player and OfflinePlayer.
+    /// It allows us to maintain two separate lists for online players (Player) and offline players (OfflinePlayer) in PlayerManager and return generic IPlayer results.
+    /// </summary>
+    public partial interface IPlayer
+    {
+        int? BankAccountNumber { get; set; }
+
+        long? BankedPyreals { get; set; }
+
+        long? BankedLuminance { get; set; }
+
+        long? BankedAshcoin { get; set; }
+
+        bool Hardcore { get; set; }
+
+        long CreatureKills { get; set; }
+
+        ulong HcPyrealsWon { get; set; }
+
+        string HcAge { get; set; }
+
+        double HcAgeTimestamp { get; set; }
+
+        long HcScore { get; set; }
+
+        long? BankedCarnageTokens { get; set; }
+
+        bool HasBounty { get; set; }
+
+        long? PriceOnHead { get; set; }
+    }
+}
