@@ -30,7 +30,31 @@ namespace ACE.Entity.Enum.Properties
         [ServerOnly]
         AllegianceXPReceived  = 9002,
         [ServerOnly]
-        VerifyXp              = 9003
+        VerifyXp              = 9003,
+
+        //Valheel
+        [SendOnLogin]
+        VitaeCpPool = 129,
+        [ServerOnly]
+        TotalXpBeyond = 9004,
+        [ServerOnly]
+        BankedPyreals = 9005,
+        [ServerOnly]
+        BankedLuminance = 9006,
+        [ServerOnly]
+        BankedAshcoin = 9007,
+        [ServerOnly]
+        PyrealSavings = 9008,
+        [ServerOnly]
+        HcPyrealsWon = 9009,
+        [ServerOnly]
+        BankedCarnageTokens = 9010,
+        [ServerOnly]
+        HcScore = 9011,
+        [ServerOnly]
+        CreatureKills = 9012,
+        [ServerOnly]
+        PriceOnHead = 9013,
     }
 
     public static class PropertyInt64Extensions

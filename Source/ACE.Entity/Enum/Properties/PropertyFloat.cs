@@ -216,9 +216,15 @@ namespace ACE.Entity.Enum.Properties
         [ServerOnly]
         PCAPRecordeOmegaY              = 8017,
         [ServerOnly]
-        PCAPRecordeOmegaZ              = 8018
+        PCAPRecordeOmegaZ              = 8018,
 
 
+
+
+
+
+
+        //Valheel
         [ServerOnly]
         MirraResistanceBonus = 8019,
         [ServerOnly]

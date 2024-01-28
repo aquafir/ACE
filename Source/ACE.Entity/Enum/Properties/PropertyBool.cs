@@ -192,6 +192,13 @@ namespace ACE.Entity.Enum.Properties
         SkillTemplesTimerReset           = 9009,
         //[ServerOnly]
         //FreeMasteryResetRenewed          = 9010,
+
+
+
+
+
+
+        //Valheel
         [ServerOnly]
         Empowered = 9010,
         [ServerOnly]

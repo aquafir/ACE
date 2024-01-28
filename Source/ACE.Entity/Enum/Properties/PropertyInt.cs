@@ -631,6 +631,8 @@ namespace ACE.Entity.Enum.Properties
         InventoryOrder                          = 9015,
 
 
+
+        //Valheel
         [ServerOnly]
         RaisedStr = 9016,
         [ServerOnly]
