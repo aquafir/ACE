@@ -349,7 +349,7 @@ namespace ACE.Server.Command.Handlers
 
             foreach (var player in top10Players)
             {
-                result.AppendLine($"{rank} - {player.Name} - {player.Level} - {player.HcAge} - {player.CreatureKills} - {player.HcPyrealsWon} - {player.HcScore} ");
+                result.AppendLine($"{rank} - {player.Name} - {player.Level} - {player.HcAge} - {player.CreatureKills ?? 0} - {player.HcPyrealsWon} - {player.HcScore} ");
                 rank++;
             }
 
